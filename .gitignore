@@ -1,0 +1,110 @@
+# ---------------------------------------------------------------
+# Secrets and credentials: never commit. Use Fly secrets in the cloud
+# and a local .env (copied from .env.example) on your machine.
+# ---------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.env
+secrets/
+*.secret
+*.secrets
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.truststore
+*.crt
+*.csr
+id_rsa*
+id_ed25519*
+*.gpg
+*.asc
+# Tink keysets and any other key material
+*keyset*.json
+*-key.json
+*credentials*.json
+service-account*.json
+# Cloud CLI state
+.fly/
+.aws/
+.atlas/
+# Spring config overrides that may hold real values
+application-local.yml
+application-local.yaml
+application-local.properties
+application-secrets.*
+# Docker/compose overrides with real values
+docker-compose.override.yml
+compose.override.yml
+
+# ---------------------------------------------------------------
+# Data: never commit real seller data, uploads, dumps or logs
+# ---------------------------------------------------------------
+*.log
+logs/
+*.dump
+*.bson
+*.archive
+dump/
+backups/
+uploads/
+data/
+*.sqlite
+*.db
+*.csv
+!src/test/resources/**/*.csv
+*.xlsx
+*.xls
+*.pdf
+!src/test/resources/**/*.pdf
+*.har
+
+# ---------------------------------------------------------------
+# Private working documents and AI-agent files: kept local, never pushed.
+# (handoff, decisions, plans, tasks, ADRs, security reviews, QA plans, drafts)
+# The one exception is the public API contract, docs/openapi.yaml.
+# ---------------------------------------------------------------
+docs/*
+!docs/openapi.yaml
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+.claude/
+.agents/
+.cursor/
+.specify/
+specs/
+memory/
+
+# ---------------------------------------------------------------
+# Build output and tooling
+# ---------------------------------------------------------------
+target/
+build/
+out/
+bin/
+.gradle/
+.mvn/wrapper/maven-wrapper.jar
+!.mvn/wrapper/maven-wrapper.properties
+*.class
+hs_err_pid*
+replay_pid*
+
+# IDEs and OS files
+.idea/
+*.iml
+.vscode/
+!.vscode/extensions.json
+.settings/
+.project
+.classpath
+.factorypath
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local Claude Code settings
+.claude/settings.local.json
