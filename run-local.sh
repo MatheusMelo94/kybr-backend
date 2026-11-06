@@ -5,6 +5,7 @@
 #   ./run-local.sh --no-mongo skip Docker; use MONGODB_URI from the environment or .env (must be a replica set)
 #   ./run-local.sh --docker   run the full containerised stack instead (docker compose up --build, profile docker)
 #   ./run-local.sh --down     stop the compose stack (keeps the Mongo volume)
+#   ./run-local.sh --secrets  only make sure .env holds the dev secrets, then exit (used by CI)
 #
 # Optional overrides: a gitignored .env (copy .env.example). Only non-empty KEY=value lines are exported.
 # First run: the profiles have no secret defaults, so any of KYBR_BFF_KEY_CURRENT, KYBR_HASH_SECRET and
@@ -74,6 +75,10 @@ case "$mode" in
   --down)
     require_compose
     exec docker compose down
+    ;;
+  --secrets)
+    ensure_dev_secrets file
+    exit 0
     ;;
   --docker)
     require_compose

@@ -63,7 +63,7 @@ public abstract class MongoIntegrationTest {
         if (container == null) {
             // Assign only after a successful start, so a failed start is reported as itself on the
             // next attempt instead of as "container should be started first".
-            MongoDBContainer started = new MongoDBContainer(IMAGE);
+            MongoDBContainer started = new MongoDBContainer(IMAGE).withReplicaSet();
             started.start();
             container = started;
         }
