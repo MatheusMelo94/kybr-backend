@@ -13,7 +13,7 @@ import org.testcontainers.mongodb.MongoDBContainer;
  * The source depends on the environment:
  *
  * <ul>
- *   <li><b>Default (CI, any machine with Docker):</b> a Testcontainers {@code mongo:8.0}
+ *   <li><b>Default (CI, any machine with Docker):</b> a Testcontainers {@code mongo:7.0}
  *       container, which Testcontainers starts as a single-node replica set. It is started once
  *       per JVM and shared by every subclass.
  *   <li><b>{@code KYBR_TEST_MONGO_URI} set:</b> that external MongoDB is used instead and no
@@ -36,7 +36,10 @@ public abstract class MongoIntegrationTest {
     public static final String EXTERNAL_DB_ENV = "KYBR_TEST_MONGO_DB";
     public static final String DATABASE = "kybr-test";
 
-    private static final String IMAGE = "mongo:8.0";
+    // MongoDB 8.x refuses to start on Linux kernels 6.19 to 7.0.13 (MongoDB SERVER-121912), which
+    // the GitHub-hosted runners now use. Tests run on 7.0, which is unaffected; the app only uses
+    // features both versions share. Move back to 8.x once the runners' kernel is fixed.
+    private static final String IMAGE = "mongo:7.0";
 
     private static MongoDBContainer container;
 
@@ -58,8 +61,11 @@ public abstract class MongoIntegrationTest {
             return external;
         }
         if (container == null) {
-            container = new MongoDBContainer(IMAGE);
-            container.start();
+            // Assign only after a successful start, so a failed start is reported as itself on the
+            // next attempt instead of as "container should be started first".
+            MongoDBContainer started = new MongoDBContainer(IMAGE);
+            started.start();
+            container = started;
         }
         return container.getReplicaSetUrl(database());
     }

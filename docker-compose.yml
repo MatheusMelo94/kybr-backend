@@ -1,4 +1,4 @@
-# Local stack: MongoDB 8 as a single-node replica set (rs0, so transactions work) + the API.
+# Local stack: MongoDB 7.0 as a single-node replica set (rs0, so transactions work) + the API.
 #   docker compose up -d --wait mongo     # Mongo only (what run-local.sh does)
 #   docker compose up --build             # full containerised stack, profile "docker"
 # Ports bind to 127.0.0.1 only. No secrets here and no secret defaults in the docker profile: the app
@@ -8,7 +8,9 @@ name: kybr
 
 services:
   mongo:
-    image: mongo:8@sha256:e16e606f792ea89d2b4907b54e5e31eb86a7a23e27231dce3a982cc8f2d73cd2
+    # MongoDB 7.0: 8.x refuses to start on Linux kernels 6.19 to 7.0.13 (MongoDB SERVER-121912),
+    # which CI runners and many dev machines now use. Move back to 8.x once that is resolved.
+    image: mongo:7.0@sha256:8bb4442761a63a8dda452744082cdac9644b429807eb977b42324a63cef59ca4
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     ports:
       - "127.0.0.1:27017:27017"
