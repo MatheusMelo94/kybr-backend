@@ -1,0 +1,55 @@
+# Local stack: MongoDB 7.0 as a single-node replica set (rs0, so transactions work) + the API.
+#   docker compose up -d --wait mongo     # Mongo only (what run-local.sh does)
+#   docker compose up --build             # full containerised stack, profile "docker"
+# Ports bind to 127.0.0.1 only. No secrets here and no secret defaults in the docker profile: the app
+# reads them from the local, gitignored .env, which ./run-local.sh --docker fills with random dev
+# values on first run (a bare "docker compose up" without them fails at startup, by design).
+name: kybr
+
+services:
+  mongo:
+    # MongoDB 7.0: 8.x refuses to start on Linux kernels 6.19 to 7.0.13 (MongoDB SERVER-121912),
+    # which CI runners and many dev machines now use. Move back to 8.x once that is resolved.
+    image: mongo:7.0@sha256:8bb4442761a63a8dda452744082cdac9644b429807eb977b42324a63cef59ca4
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo-data:/data/db
+      - ./docker/mongo/init-replica-set.js:/docker-init/init-replica-set.js:ro
+    healthcheck:
+      # Initiates rs0 on first run (idempotent) and reports healthy once this node is a writable primary.
+      test: ["CMD", "mongosh", "--quiet", "--norc", "/docker-init/init-replica-set.js"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 10s
+      start_interval: 1s
+
+  app:
+    build:
+      context: .
+    image: kybr-api:local
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      # Container-to-container: direct connection to the rs0 primary (its advertised host is localhost).
+      MONGODB_URI: mongodb://mongo:27017/kybr?directConnection=true
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8081:8081"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  mongo-data:

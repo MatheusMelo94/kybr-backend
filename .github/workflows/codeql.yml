@@ -1,0 +1,81 @@
+# CodeQL SAST (Java + GitHub Actions workflows), security-extended queries.
+# Runs automatically while the repository is public (free). If it becomes private, set CODEQL_ENABLED="true"; CodeQL on a PRIVATE repository needs a
+# GitHub Code Security (Advanced Security) licence; enable the variable only once that is in place
+# (or the repository is public). Results then appear under Security > Code scanning.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    if: github.event.repository.private == false || vars.CODEQL_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: java-kotlin
+            build-mode: manual
+          - language: actions
+            build-mode: none
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Detect Maven project
+        id: detect
+        run: |
+          if [ "${{ matrix.language }}" != "java-kotlin" ] || { [ -f pom.xml ] && [ -f mvnw ]; }; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No Maven project yet; Java analysis skipped."
+          fi
+
+      - name: Set up JDK 25
+        if: steps.detect.outputs.run == 'true' && matrix.language == 'java-kotlin'
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      - name: Initialize CodeQL
+        if: steps.detect.outputs.run == 'true'
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Build (no tests)
+        if: steps.detect.outputs.run == 'true' && matrix.build-mode == 'manual'
+        run: |
+          chmod +x mvnw
+          # maven.test.skip also skips compiling tests: for Java, CodeQL analyses what the build
+          # compiles (paths-ignore does not apply), and test code is out of scope.
+          ./mvnw -B -ntp -Dmaven.test.skip=true package
+
+      - name: Analyze
+        if: steps.detect.outputs.run == 'true'
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: "/language:${{ matrix.language }}"

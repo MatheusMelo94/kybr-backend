@@ -32,9 +32,12 @@ service-account*.json
 .aws/
 .atlas/
 # Spring config overrides that may hold real values
-application-local.yml
-application-local.yaml
-application-local.properties
+# (src/main/resources/application-local.yml is committed: non-secret dev
+# defaults only. Developer overrides live at the repo root or in config/.)
+/application-local.yml
+/application-local.yaml
+/application-local.properties
+/config/
 application-secrets.*
 # Docker/compose overrides with real values
 docker-compose.override.yml
@@ -63,8 +66,7 @@ data/
 *.har
 
 # ---------------------------------------------------------------
-# Private working documents and AI-agent files: kept local, never pushed.
-# (handoff, decisions, plans, tasks, ADRs, security reviews, QA plans, drafts)
+# Local working files: kept local, never pushed.
 # The one exception is the public API contract, docs/openapi.yaml.
 # ---------------------------------------------------------------
 docs/*

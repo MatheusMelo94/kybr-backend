@@ -1,0 +1,8 @@
+# Allowlist: the build context contains only what the Maven build needs.
+# Everything else (docs, .env files, git metadata, agent files, deploy configs) never reaches the builder.
+*
+!pom.xml
+!mvnw
+!.mvn/
+!src/
+src/test/

@@ -1,0 +1,14 @@
+# CodeQL scans production code. Test sources are excluded (for Java, by not compiling them in the
+# CodeQL build; this list covers the other analysed languages): they never ship, and several tests
+# deliberately do unsafe things (e.g. set cookies) to prove the production filters block them.
+name: kybr-codeql
+paths-ignore:
+  - src/test/**
+
+# The CSRF rule is excluded on purpose: the API authenticates with explicit headers only and never
+# reads or sets cookies, so there is no browser-attached credential to forge (see SecurityConfig).
+# The architecture tests fail the build if code ever reads or sets a cookie; if cookie-based auth is
+# ever introduced, re-enable CSRF protection and remove this exclusion.
+query-filters:
+  - exclude:
+      id: java/spring-disabled-csrf-protection

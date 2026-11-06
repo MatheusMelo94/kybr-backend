@@ -1,0 +1,28 @@
+# Fly.io config: LOG SHIPPER (kybr-log-shipper), region gru. Private app: no public services or IPs.
+#   Deploy manually:  fly deploy --config deploy/log-shipper/fly.toml --remote-only
+#   Secrets (fly secrets set ... --app kybr-log-shipper): ACCESS_TOKEN, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+app = "kybr-log-shipper"
+primary_region = "gru"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ORG = "personal"
+  AWS_REGION = "sa-east-1"
+  S3_BUCKET = "kybr-logs-sa-east-1"
+
+# No [[services]] / [http_service]: nothing is exposed. One always-on machine.
+[checks]
+  [checks.vector]
+    type = "http"
+    port = 8686
+    method = "GET"
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

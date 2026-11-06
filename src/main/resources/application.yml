@@ -1,0 +1,101 @@
+# Base configuration, shared by every profile.
+# Secrets have no defaults here: staging and prod read them from the environment (Fly secrets),
+# and KybrProperties stops startup when one is missing or malformed. Only the local, docker and
+# test profiles add non-secret dev placeholders.
+
+server:
+  port: ${PORT:8080}
+  forward-headers-strategy: none # X-Forwarded-* is never trusted; KybrProperties.ClientIp decides
+  max-http-request-header-size: 16KB
+  servlet:
+    session:
+      tracking-modes: [] # no session cookie, no URL rewriting
+  error:
+    whitelabel:
+      enabled: false
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
+    include-path: never
+    include-exception: false
+  tomcat:
+    accesslog:
+      enabled: false # AccessLogFilter writes the only access log
+
+spring:
+  application:
+    name: kybr
+  threads:
+    virtual:
+      enabled: true # request handling runs on virtual threads
+  mongodb:
+    uri: ${MONGODB_URI}
+  data:
+    mongodb:
+      auto-index-creation: false # IndexBootstrap creates indexes
+  web:
+    resources:
+      add-mappings: false # no static resources, so no directory redirects
+  servlet:
+    multipart:
+      enabled: false # off until the seller document upload needs it, and then for that route only
+  mvc:
+    log-request-details: false
+
+management:
+  server:
+    port: ${MANAGEMENT_PORT:8081} # internal only, never published
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: never
+      show-components: never
+      probes:
+        enabled: true
+      group:
+        liveness:
+          include: livenessState
+          additional-path: "server:/livez" # the only probe on the main port; readiness stays on 8081
+        readiness:
+          include: readinessState,mongo # 8081 only
+
+springdoc:
+  api-docs:
+    enabled: false # enabled in local and test only
+  # The contract of record documents production controllers only, never test probes.
+  packages-to-scan: com.matheusmelo.kybr.controller
+
+kybr:
+  bff:
+    current: ${KYBR_BFF_KEY_CURRENT:}
+    previous: ${KYBR_BFF_KEY_PREVIOUS:}
+    # Deny by default: the key is required everywhere except these (method, pattern)
+    # pairs, matched exactly on the normalised path. A new exemption is a deliberate design decision.
+    exemptions:
+      - method: GET
+        pattern: /livez
+      - method: POST
+        pattern: "/public/v/{slug}/cases/{token}/documents" # seller document upload: browser to API, no key
+      - method: OPTIONS
+        pattern: "/public/v/{slug}/cases/{token}/documents"
+  client-ip:
+    platform-header: ${KYBR_CLIENT_IP_PLATFORM_HEADER:}
+  hashing:
+    secret: ${KYBR_HASH_SECRET:}
+    previous: ${KYBR_HASH_SECRET_PREVIOUS:}
+  idempotency:
+    enc-key: ${KYBR_IDEMPOTENCY_ENC_KEY:}
+  limits:
+    default-max-body: 1MB # 1 MiB
+    # Routes that accept only multipart/form-data (anything else is 415 before the body is read),
+    # each with its own cap (no route is ever uncapped).
+    multipart:
+      - method: POST
+        pattern: "/public/v/{slug}/cases/{token}/documents"
+        max-body: 11MB # document upload: one tipo per request, 10 MiB of files + multipart overhead; B2 confirms
+  logging:
+    token-prefixes:
+      - cases # the next path segment is a case token, redacted in logs

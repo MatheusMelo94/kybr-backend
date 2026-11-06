@@ -1,0 +1,5 @@
+org.springframework.context.ApplicationListener=\
+com.matheusmelo.kybr.config.logging.LogRedactionEnvironmentListener
+
+org.springframework.boot.logging.structured.StructuredLoggingJsonMembersCustomizer=\
+com.matheusmelo.kybr.config.logging.RedactingJsonMembersCustomizer
