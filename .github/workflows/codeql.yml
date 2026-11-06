@@ -70,7 +70,9 @@ jobs:
         if: steps.detect.outputs.run == 'true' && matrix.build-mode == 'manual'
         run: |
           chmod +x mvnw
-          ./mvnw -B -ntp -DskipTests package
+          # maven.test.skip also skips compiling tests: for Java, CodeQL analyses what the build
+          # compiles (paths-ignore does not apply), and test code is out of scope.
+          ./mvnw -B -ntp -Dmaven.test.skip=true package
 
       - name: Analyze
         if: steps.detect.outputs.run == 'true'

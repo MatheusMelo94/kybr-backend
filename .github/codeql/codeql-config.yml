@@ -1,4 +1,5 @@
-# CodeQL scans production code. Test sources are excluded: they never ship, and several tests
+# CodeQL scans production code. Test sources are excluded (for Java, by not compiling them in the
+# CodeQL build; this list covers the other analysed languages): they never ship, and several tests
 # deliberately do unsafe things (e.g. set cookies) to prove the production filters block them.
 name: kybr-codeql
 paths-ignore:
