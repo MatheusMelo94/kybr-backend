@@ -1,0 +1,169 @@
+# Deploy PRODUCTION (kybr-api, Fly gru). Manual trigger only, by the owner, after a Deploy Checklist with GO.
+# Preflight: the commit must be on main, CI must be green for it, and staging must have deployed it.
+# Inert until the repo/environment secret FLY_API_TOKEN_PROD exists (app-scoped deploy token:
+#   fly tokens create deploy --app kybr-api). The job then logs a notice and deploys nothing.
+# Rollback: on a failed deploy or smoke test, redeploys the image that was running before.
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Full 40-char commit SHA to deploy (on main, CI green, already on staging)"
+        required: true
+        type: string
+      release_tag:
+        description: "Release tag to create, e.g. v0.1.0"
+        required: true
+        type: string
+      deploy_checklist:
+        description: "Deploy Checklist file name with recommendation GO (YYYY-MM-DD_<tag>_vN.md)"
+        required: true
+        type: string
+      confirm:
+        description: "Type GO to confirm the checklist recommends GO and you accept the deploy"
+        required: true
+        type: string
+      allow_unstaged:
+        description: "Skip the 'already deployed to staging' check (record why in the checklist)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Preflight gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    env:
+      SHA: ${{ inputs.sha }}
+      TAG: ${{ inputs.release_tag }}
+      CHECKLIST: ${{ inputs.deploy_checklist }}
+      CONFIRM: ${{ inputs.confirm }}
+      ALLOW_UNSTAGED: ${{ inputs.allow_unstaged }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Validate inputs
+        run: |
+          [ "$CONFIRM" = "GO" ] || { echo "::error::confirm must be exactly GO"; exit 1; }
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be a full 40-char lowercase commit SHA"; exit 1; }
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::release_tag must look like v1.2.3"; exit 1; }
+          [[ "$CHECKLIST" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}_.+_v[0-9]+\.md$ ]] || { echo "::error::deploy_checklist must be YYYY-MM-DD_<tag>_vN.md"; exit 1; }
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Commit is on main and tag is new
+        run: |
+          git merge-base --is-ancestor "$SHA" origin/main || { echo "::error::$SHA is not on main"; exit 1; }
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "::error::tag $TAG already exists"; exit 1
+          fi
+
+      - name: CI green for this commit
+        run: |
+          n=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&status=success" --jq '.total_count')
+          [ "${n:-0}" -gt 0 ] || { echo "::error::no successful CI run for $SHA"; exit 1; }
+
+      - name: Already deployed to staging
+        if: inputs.allow_unstaged != true
+        run: |
+          n=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-staging.yml/runs?head_sha=${SHA}&status=success" --jq '.total_count')
+          [ "${n:-0}" -gt 0 ] || { echo "::error::no successful staging deploy for $SHA (set allow_unstaged only with a recorded reason)"; exit 1; }
+
+      - name: Record gates
+        run: |
+          {
+            echo "### Production deploy request"
+            echo "- Commit: \`$SHA\`"
+            echo "- Release tag: \`$TAG\`"
+            echo "- Deploy Checklist (GO): \`$CHECKLIST\`"
+            echo "- Staging check skipped: $ALLOW_UNSTAGED"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy kybr-api
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write # release tag only
+    environment:
+      name: production
+      url: ${{ vars.PROD_BASE_URL || 'https://kybr-api.fly.dev' }}
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_PROD }}
+      FLY_APP: kybr-api
+      FLY_CONFIG: fly.prod.toml
+      BASE_URL: ${{ vars.PROD_BASE_URL || 'https://kybr-api.fly.dev' }}
+      SHA: ${{ inputs.sha }}
+      TAG: ${{ inputs.release_tag }}
+      CHECKLIST: ${{ inputs.deploy_checklist }}
+    steps:
+      - name: Check deploy prerequisites
+        id: gate
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Production deploy inert::FLY_API_TOKEN_PROD is not set; nothing deployed."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          ref: ${{ inputs.sha }}
+
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # v1.6
+        if: steps.gate.outputs.ready == 'true'
+
+      - name: Record last-known-good image
+        id: lkg
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          image=$(flyctl machines list --app "$FLY_APP" --json | jq -r '[.[].config.image | select(. != null)] | first // empty')
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "Last-known-good image: ${image:-none (first deploy)}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy
+        id: deploy
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          flyctl deploy --config "$FLY_CONFIG" --app "$FLY_APP" --remote-only \
+            --image-label "${TAG}-git-${SHA}" --strategy rolling --wait-timeout 10m
+          echo "Deployed registry.fly.io/${FLY_APP}:${TAG}-git-${SHA}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Smoke test
+        id: smoke
+        if: steps.gate.outputs.ready == 'true'
+        run: scripts/ci/smoke.sh "$BASE_URL" 90
+
+      - name: Tag release
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" "$SHA" -m "Production release $TAG (Deploy Checklist: $CHECKLIST, recommendation GO)"
+          git push origin "refs/tags/$TAG"
+
+      - name: Roll back to last-known-good image
+        if: always() && steps.lkg.outputs.image != '' && (steps.deploy.outcome == 'failure' || steps.smoke.outcome == 'failure')
+        env:
+          LKG_IMAGE: ${{ steps.lkg.outputs.image }}
+        run: |
+          echo "::warning title=Rolling back::redeploying $LKG_IMAGE"
+          flyctl deploy --config "$FLY_CONFIG" --app "$FLY_APP" --image "$LKG_IMAGE" --strategy rolling --wait-timeout 10m
+          echo "Rolled back to $LKG_IMAGE" >> "$GITHUB_STEP_SUMMARY"

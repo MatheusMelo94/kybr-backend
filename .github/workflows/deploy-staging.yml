@@ -1,0 +1,89 @@
+# Deploy STAGING (kybr-api-staging, Fly gru) after CI passes on a push to main. Manual re-run via dispatch.
+# Inert until the repo/environment secret FLY_API_TOKEN_STAGING exists (app-scoped deploy token:
+#   fly tokens create deploy --app kybr-api-staging). The job then logs a notice and deploys nothing.
+# Rollback: on a failed deploy or smoke test, redeploys the image that was running before.
+name: Deploy staging
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy kybr-api-staging
+    # Only CI runs from a push to main in this repository (never fork PRs whose head branch is named main).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_BASE_URL || 'https://kybr-api-staging.fly.dev' }}
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_STAGING }}
+      FLY_APP: kybr-api-staging
+      FLY_CONFIG: fly.toml
+      BASE_URL: ${{ vars.STAGING_BASE_URL || 'https://kybr-api-staging.fly.dev' }}
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Check deploy prerequisites
+        id: gate
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Staging deploy inert::FLY_API_TOKEN_STAGING is not set; nothing deployed."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+          persist-credentials: false
+
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # v1.6
+        if: steps.gate.outputs.ready == 'true'
+
+      - name: Record last-known-good image
+        id: lkg
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          image=$(flyctl machines list --app "$FLY_APP" --json | jq -r '[.[].config.image | select(. != null)] | first // empty')
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "Last-known-good image: ${image:-none (first deploy)}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy
+        id: deploy
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          flyctl deploy --config "$FLY_CONFIG" --app "$FLY_APP" --remote-only \
+            --image-label "git-${DEPLOY_SHA}" --strategy rolling --wait-timeout 10m
+          echo "Deployed registry.fly.io/${FLY_APP}:git-${DEPLOY_SHA}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Smoke test
+        id: smoke
+        if: steps.gate.outputs.ready == 'true'
+        run: scripts/ci/smoke.sh "$BASE_URL" 120
+
+      - name: Roll back to last-known-good image
+        if: always() && steps.lkg.outputs.image != '' && (steps.deploy.outcome == 'failure' || steps.smoke.outcome == 'failure')
+        env:
+          LKG_IMAGE: ${{ steps.lkg.outputs.image }}
+        run: |
+          echo "::warning title=Rolling back::redeploying $LKG_IMAGE"
+          flyctl deploy --config "$FLY_CONFIG" --app "$FLY_APP" --image "$LKG_IMAGE" --strategy rolling --wait-timeout 10m
+          echo "Rolled back to $LKG_IMAGE" >> "$GITHUB_STEP_SUMMARY"

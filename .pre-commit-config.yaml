@@ -1,0 +1,7 @@
+# Local pre-commit hooks. One-time setup:  pipx install pre-commit && pre-commit install
+# gitleaks scans staged changes with .gitleaks.toml (the same config CI uses).
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks

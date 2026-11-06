@@ -1,0 +1,10 @@
+# Test profile. No key material: tests generate their secrets in memory (TestSecrets), and
+# MongoIntegrationTest supplies them together with the MongoDB URI.
+
+spring:
+  mongodb:
+    uri: ${MONGODB_URI:mongodb://127.0.0.1:27017/kybr-test?replicaSet=rs0}
+
+springdoc:
+  api-docs:
+    enabled: true

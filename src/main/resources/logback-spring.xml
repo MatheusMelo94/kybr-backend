@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Console logging with redaction. staging and prod (logging.structured.format.console=ecs)
+  use Boot's structured appender, redacted by RedactingJsonMembersCustomizer (META-INF/spring.factories).
+  Every other profile uses Boot's console pattern wrapped in %redact(...), stack trace included.
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <conversionRule conversionWord="redact" class="com.matheusmelo.kybr.config.logging.RedactingConverter"/>
+
+    <springProfile name="staging | prod">
+        <include resource="org/springframework/boot/logging/logback/structured-console-appender.xml"/>
+    </springProfile>
+
+    <springProfile name="!(staging | prod)">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                <level>${CONSOLE_LOG_THRESHOLD}</level>
+            </filter>
+            <encoder>
+                <pattern>%redact(${CONSOLE_LOG_PATTERN})</pattern>
+                <charset>${CONSOLE_LOG_CHARSET}</charset>
+            </encoder>
+        </appender>
+    </springProfile>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>

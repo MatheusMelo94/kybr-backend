@@ -1,0 +1,64 @@
+# Vector pipeline: Fly.io org log stream (NATS) -> S3 sa-east-1.
+# Ships only the kybr-api* apps (staging + prod), one prefix per app and day, gzip NDJSON.
+# Retention (<= 30 days) is enforced by the bucket lifecycle rule (aws/bucket-lifecycle.json), not here.
+# Env (Fly secrets): ACCESS_TOKEN (org read-only token), AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+# Env (fly.toml [env]): ORG, S3_BUCKET, AWS_REGION
+data_dir: /var/lib/vector
+
+api:
+  enabled: true
+  address: "[::]:8686"
+
+sources:
+  fly_logs:
+    type: nats
+    url: "nats://[fdaa::3]:4223"
+    subject: "logs.>"
+    connection_name: "kybr-log-shipper"
+    auth:
+      strategy: user_password
+      user_password:
+        user: "${ORG}"
+        password: "${ACCESS_TOKEN}"
+
+transforms:
+  parse:
+    type: remap
+    inputs: [fly_logs]
+    source: |
+      . = parse_json!(string!(.message))
+      # The app writes ECS JSON lines; keep them structured when they parse, raw otherwise.
+      app_event, err = parse_json(.message)
+      if err == null && is_object(app_event) {
+        .app_event = app_event
+        del(.message)
+      }
+
+  kybr_api_only:
+    type: filter
+    inputs: [parse]
+    condition: 'starts_with(string(.fly.app.name) ?? "", "kybr-api")'
+
+sinks:
+  s3:
+    type: aws_s3
+    inputs: [kybr_api_only]
+    bucket: "${S3_BUCKET}"
+    region: "${AWS_REGION}"
+    key_prefix: "{{ fly.app.name }}/date=%Y-%m-%d/"
+    compression: gzip
+    server_side_encryption: AES256
+    # The shipper's credentials are PutObject-only, so the HeadBucket healthcheck would always fail.
+    healthcheck:
+      enabled: false
+    encoding:
+      codec: json
+    framing:
+      method: newline_delimited
+    batch:
+      timeout_secs: 300
+      max_bytes: 10000000
+    buffer:
+      type: memory
+      max_events: 20000
+      when_full: block

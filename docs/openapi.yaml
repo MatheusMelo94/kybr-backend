@@ -1,0 +1,82 @@
+openapi: 3.1.0
+info:
+  title: Kybr API
+  version: 0.1.0
+servers:
+- url: https://api.kybr.com.br
+- url: https://api-staging.kybr.com.br
+paths: {}
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      description: The error envelope. `message` is fixed per code; clients branch
+        on `code`.
+      properties:
+        code:
+          type: string
+          description: The error code.
+          enum:
+          - LINK_NAO_ENCONTRADO
+          - EMPRESA_NAO_ENCONTRADA
+          - CNPJ_INVALIDO
+          - RESPONSAVEL_INVALIDO
+          - LIMITE_CONSULTAS
+          - LIMITE_CNPJ
+          - LIMITE_TENTATIVAS
+          - CASO_NAO_ENCONTRADO
+          - EMAIL_INVALIDO
+          - ARQUIVO_GRANDE
+          - FORMATO_INVALIDO
+          - CASO_DECIDIDO
+          - LIMITE_ARQUIVOS
+          - AUTOFILL_DESATIVADO
+          - SESSAO_EXPIRADA
+          - TURNSTILE_REQUERIDO
+          - TURNSTILE_INVALIDO
+          - TESTE_INDISPONIVEL
+          - TESTE_PAUSADO
+          - CREDENCIAIS_INVALIDAS
+          - EMAIL_NAO_CONFIRMADO
+          - EMAIL_EM_USO
+          - SENHA_FRACA
+          - VALOR_INVALIDO
+          - CODIGO_INCORRETO
+          - CODIGO_EXPIRADO
+          - TOKEN_INVALIDO
+          - RECURSO_NAO_ENCONTRADO
+          - LOTE_NAO_ENCONTRADO
+          - SEM_SALDO
+          - MUITAS_LINHAS
+          - SEM_CNPJ_VALIDO
+          - LOTE_EM_ANDAMENTO
+          - CASO_JA_DECIDIDO
+          - MOTIVO_OBRIGATORIO
+          - DOCUMENTO_NAO_HABILITADO
+          - SENHA_ATUAL_INCORRETA
+          - REVERIFICACAO_EM_ANDAMENTO
+          - POLITICA_DESATUALIZADA
+          - SEM_DOCUMENTO_HABILITADO
+          - BFF_KEY_AUSENTE
+          - ERRO_INTERNO
+          - INDISPONIVEL
+          - REQUISICAO_INVALIDA
+          - METODO_NAO_PERMITIDO
+          - FORMATO_NAO_ACEITO
+          - MIDIA_NAO_SUPORTADA
+          - REQUISICAO_GRANDE
+        message:
+          type: string
+          description: "A fixed, generic message for the code."
+        field:
+          type: string
+          description: "The offending field or header, when known."
+      required:
+      - code
+      - message
+  headers:
+    X-Request-Id:
+      description: "A fresh UUID v4 for this request, for support and log correlation."
+      schema:
+        type: string
+        format: uuid

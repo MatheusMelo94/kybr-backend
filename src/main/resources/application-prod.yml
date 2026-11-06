@@ -1,0 +1,14 @@
+# Cloud profile (Fly, behind the BFF). No secret has a default: MONGODB_URI,
+# KYBR_BFF_KEY_CURRENT, KYBR_HASH_SECRET and KYBR_IDEMPOTENCY_ENC_KEY must come from Fly secrets.
+
+logging:
+  structured:
+    format:
+      console: ecs
+  level:
+    org.springframework.web: INFO
+    org.apache.catalina: INFO
+
+kybr:
+  client-ip:
+    platform-header: ${KYBR_CLIENT_IP_PLATFORM_HEADER:Fly-Client-IP}

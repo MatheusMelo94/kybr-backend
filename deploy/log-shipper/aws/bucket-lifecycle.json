@@ -1,0 +1,11 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-logs-30-days",
+      "Status": "Enabled",
+      "Filter": {},
+      "Expiration": { "Days": 30 },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+    }
+  ]
+}

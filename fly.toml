@@ -1,0 +1,72 @@
+# Fly.io config: STAGING API (kybr-api-staging), region gru (São Paulo).
+#   Deploy: .github/workflows/deploy-staging.yml (or: fly deploy --config fly.toml --remote-only)
+#   Secrets (Fly secrets, never in this file): MONGODB_URI, KYBR_BFF_KEY_CURRENT, KYBR_BFF_KEY_PREVIOUS,
+#     KYBR_HASH_SECRET, KYBR_HASH_SECRET_PREVIOUS, KYBR_IDEMPOTENCY_ENC_KEY
+#   Cost posture: auto-stop to zero when idle; no static egress IP. Network access settings are
+#     documented privately.
+app = "kybr-api-staging"
+primary_region = "gru"
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  strategy = "rolling"
+
+[env]
+  SPRING_PROFILES_ACTIVE = "staging"
+  PORT = "8080"
+  MANAGEMENT_PORT = "8081"
+  KYBR_CLIENT_IP_PLATFORM_HEADER = "Fly-Client-IP"
+
+# Public edge: 443 only (TLS terminated by Fly, TLS >= 1.2). No port 80, no force_https, no redirect.
+# Deliberately [[services]] rather than [http_service], which would add port 80.
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [services.concurrency]
+    type = "requests"
+    soft_limit = 150
+    hard_limit = 200
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+    [services.ports.tls_options]
+      alpn = ["h2", "http/1.1"]
+      versions = ["TLSv1.2", "TLSv1.3"]
+
+  # Liveness on the main port (routing + deploy gate). Status only, no BFF key, no Mongo dependency.
+  [[services.http_checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "45s"
+    method = "GET"
+    path = "/livez"
+    protocol = "http"
+
+# Readiness (includes Mongo ping, cached 2 s) on the unpublished management port 8081.
+[checks]
+  [checks.readiness]
+    type = "http"
+    port = 8081
+    method = "GET"
+    path = "/actuator/health/readiness"
+    interval = "15s"
+    timeout = "3s"
+    grace_period = "45s"
+
+# Fly scrapes Micrometer's Prometheus endpoint on the management port (internal only).
+[metrics]
+  port = 8081
+  path = "/actuator/prometheus"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
