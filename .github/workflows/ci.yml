@@ -4,8 +4,9 @@
 name: CI
 
 on:
+  # main on push; every other branch runs through its pull request (one run per commit).
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
