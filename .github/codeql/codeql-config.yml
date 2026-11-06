@@ -1,0 +1,5 @@
+# CodeQL scans production code. Test sources are excluded: they never ship, and several tests
+# deliberately do unsafe things (e.g. set cookies) to prove the production filters block them.
+name: kybr-codeql
+paths-ignore:
+  - src/test/**

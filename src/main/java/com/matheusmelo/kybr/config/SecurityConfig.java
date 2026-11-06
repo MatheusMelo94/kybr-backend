@@ -49,6 +49,9 @@ public class SecurityConfig {
     /** The settings every chain in this API shares. */
     public static void statelessApiDefaults(HttpSecurity http, AuthenticationEntryPoint entryPoint,
             AccessDeniedHandler deniedHandler) throws Exception {
+        // CSRF protection is off on purpose: this API never uses cookies or any other credential a
+        // browser attaches automatically. Callers authenticate with an explicit header added
+        // server-side, and the API never sets cookies, so there is no ambient credential to forge.
         http.csrf(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
