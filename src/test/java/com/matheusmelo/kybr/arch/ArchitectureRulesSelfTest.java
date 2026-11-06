@@ -25,6 +25,8 @@ class ArchitectureRulesSelfTest {
                 Arguments.of(ArchitectureRulesTest.NO_REDIRECTS_COOKIES_OR_SESSIONS, "sendRedirect"),
                 Arguments.of(ArchitectureRulesTest.NO_REDIRECTS_COOKIES_OR_SESSIONS, "addCookie"),
                 Arguments.of(ArchitectureRulesTest.NO_REDIRECTS_COOKIES_OR_SESSIONS, "getSession"),
+                Arguments.of(ArchitectureRulesTest.NO_COOKIE_READS, "getCookies"),
+                Arguments.of(ArchitectureRulesTest.NO_COOKIE_READS, "CookieValue"),
                 Arguments.of(ArchitectureRulesTest.NO_X_FORWARDED_FOR, "ViolatingFilter references"),
                 Arguments.of(ArchitectureRulesTest.NO_CNPJ_CANONICALIZE_AT_BOUNDARY, "Cnpj.canonicalize"),
                 Arguments.of(ArchitectureRulesTest.FILTERS_DO_NOT_ROUTE_ON_RAW_URI, "routesOnRawUri"));

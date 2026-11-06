@@ -47,6 +47,17 @@ public class ArchitectureRulesTest {
             .orShould(callServletMethod(HttpServletResponse.class, "addCookie"))
             .orShould(callServletMethod(HttpServletRequest.class, "getSession"));
 
+    /**
+     * The API authenticates with explicit headers only, never cookies, which is why CSRF protection
+     * is off (see SecurityConfig). Reading a cookie anywhere fails the build, so cookie-based auth
+     * cannot be added without revisiting that decision.
+     */
+    @ArchTest
+    public static final ArchRule NO_COOKIE_READS = noClasses()
+            .should(callServletMethod(HttpServletRequest.class, "getCookies"))
+            .orShould().dependOnClassesThat()
+            .haveFullyQualifiedName("org.springframework.web.bind.annotation.CookieValue");
+
     @ArchTest
     public static final ArchRule NO_X_FORWARDED_FOR = noClasses()
             .should(referenceStringConstant("X-Forwarded-For"));

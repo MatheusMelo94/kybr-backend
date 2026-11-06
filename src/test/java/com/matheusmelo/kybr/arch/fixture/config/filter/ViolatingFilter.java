@@ -16,6 +16,10 @@ public class ViolatingFilter {
         response.addCookie(new Cookie("name", "value"));
     }
 
+    Object readCookies(HttpServletRequest request) {
+        return request.getCookies();
+    }
+
     Object session(HttpServletRequest request) {
         return request.getSession();
     }
