@@ -2,7 +2,7 @@
 # Alerting image: vmalert (evaluates the rules against Fly's managed Prometheus API) + Alertmanager
 # (routes to e-mail and the dead-man check). Fly's managed Grafana has no alerting, so this small app
 # does it. Base images pinned by tag + digest; Dependabot (docker ecosystem) proposes updates.
-FROM prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a AS alertmanager
+FROM prom/alertmanager:v0.34.2@sha256:39d8bb3966c694a124428a3a88fbcffd40bd069129ecd47c059f8a3f17c55f3b AS alertmanager
 
 FROM victoriametrics/vmalert:v1.154.1@sha256:aafb962b5a5713c71f0d697d629416f9cccf23aecb74f0ec5e829ddbf3f221f2
 
