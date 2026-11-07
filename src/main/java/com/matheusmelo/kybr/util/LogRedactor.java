@@ -1,8 +1,10 @@
 package com.matheusmelo.kybr.util;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.UnaryOperator;
@@ -39,6 +41,8 @@ import java.util.stream.Collectors;
 public final class LogRedactor {
 
     public static final String REDACTED = "[REDACTED]";
+    /** The longest path {@link #redactPath} returns, before its ellipsis. */
+    public static final int MAX_PATH_CHARS = 256;
 
     private static final int TOKEN_HASH_CHARS = 12;
     private static final String SEPARATOR = "(?:/|%2[fF])";
@@ -58,6 +62,11 @@ public final class LogRedactor {
             + "(?:[A-Za-z0-9-]{1,63}\\.){1,8}[A-Za-z]{2,24}(?![A-Za-z0-9-])");
     private static final Pattern CNPJ_PUNCTUATED = Pattern.compile(
             "(?<![0-9A-Za-z])[0-9A-Z]{2}\\.[0-9A-Z]{3}\\.[0-9A-Z]{3}/[0-9A-Z]{4}-[0-9]{2}(?![0-9A-Za-z])");
+    /**
+     * Characters that could break or disguise a log line: controls, format marks, and every
+     * separator (a space would let a path forge a {@code key=value} field).
+     */
+    private static final Pattern LOG_UNSAFE = Pattern.compile("[\\p{Cc}\\p{Cf}\\p{Z}]");
     private static final Pattern CNPJ_BARE = Pattern.compile("(?<![0-9A-Za-z])[0-9A-Z]{12}[0-9]{2}(?![0-9A-Za-z])");
 
     private final List<String> secretLiterals;
@@ -96,6 +105,27 @@ public final class LogRedactor {
         out = CNPJ_PUNCTUATED.matcher(out).replaceAll("[CNPJ]");
         out = CNPJ_BARE.matcher(out).replaceAll(m -> Cnpj.isValidCanonical(m.group()) ? "[CNPJ]" : m.group());
         return CpfMasker.maskBounded(out);
+    }
+
+    /**
+     * A raw request path made safe for one log line: control, format and separator characters
+     * (spaces included) are percent-encoded (CR becomes {@code %0D}, as an encoded one already reads), then the usual
+     * redaction, then at most {@link #MAX_PATH_CHARS} characters (an ellipsis marks a cut).
+     */
+    public String redactPath(String rawPath) {
+        if (rawPath == null) {
+            return null;
+        }
+        String out = redact(LOG_UNSAFE.matcher(rawPath).replaceAll(m -> percentEncoded(m.group())));
+        return out.length() > MAX_PATH_CHARS ? out.substring(0, MAX_PATH_CHARS) + "\u2026" : out;
+    }
+
+    private static String percentEncoded(String character) {
+        StringBuilder out = new StringBuilder();
+        for (byte b : character.getBytes(StandardCharsets.UTF_8)) {
+            out.append('%').append(String.format(Locale.ROOT, "%02X", b & 0xFF));
+        }
+        return out.toString();
     }
 
     private String hashCaseTokens(String text) {
