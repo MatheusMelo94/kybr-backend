@@ -117,7 +117,10 @@ public final class LogRedactor {
             return null;
         }
         String out = redact(LOG_UNSAFE.matcher(rawPath).replaceAll(m -> percentEncoded(m.group())));
-        return out.length() > MAX_PATH_CHARS ? out.substring(0, MAX_PATH_CHARS) + "\u2026" : out;
+        out = out.length() > MAX_PATH_CHARS ? out.substring(0, MAX_PATH_CHARS) + "\u2026" : out;
+        // Second layer: line breaks are already percent-encoded above, so this changes nothing in
+        // practice, but it keeps the guarantee local and recognisable to static analysis.
+        return out.replaceAll("[\r\n]", "");
     }
 
     private static String percentEncoded(String character) {
