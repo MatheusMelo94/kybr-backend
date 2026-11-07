@@ -19,6 +19,10 @@ import java.util.regex.Pattern;
  *       letters on its left is still masked.
  * </ol>
  *
+ * <p>Full-width digits ({@code U+FF10}–{@code U+FF19}) are folded to ASCII first, so a CPF typed
+ * in them is masked too (the returned text carries the folded digits). A run of exactly 22 digits
+ * (two CPFs glued together) is masked as two masks.
+ *
  * <p>10- and 12-digit runs are untouched; an 11-digit phone-like run is masked (accepted
  * over-mask). Idempotent, null-safe, and no other text changes. Every pattern is bounded, so
  * matching is linear in the input.
@@ -37,6 +41,9 @@ public final class CpfMasker {
     private static final Pattern BOUNDED_CPF_RUN =
             Pattern.compile("(?<![0-9A-Za-z])" + CPF_SHAPE + "(?![0-9A-Za-z])");
     private static final Pattern ANY_DIGIT = Pattern.compile("[0-9]");
+    private static final Pattern GLUED_PAIR = Pattern.compile("(?<![0-9])[0-9]{22}(?![0-9])");
+    private static final char FULL_WIDTH_ZERO = '\uFF10';
+    private static final char FULL_WIDTH_NINE = '\uFF19';
 
     private CpfMasker() {
     }
@@ -57,6 +64,7 @@ public final class CpfMasker {
         if (text == null || text.isEmpty()) {
             return text;
         }
+        text = GLUED_PAIR.matcher(foldFullWidthDigits(text)).replaceAll(Matcher.quoteReplacement(MASK + MASK));
         List<int[]> protectedSpans = validCnpjSpans(text);
         Matcher run = cpfRun.matcher(text);
         StringBuilder out = new StringBuilder(text.length());
@@ -68,6 +76,18 @@ public final class CpfMasker {
             }
         }
         return last == 0 ? text : out.append(text, last, text.length()).toString();
+    }
+
+    private static String foldFullWidthDigits(String text) {
+        if (text.chars().noneMatch(c -> c >= FULL_WIDTH_ZERO && c <= FULL_WIDTH_NINE)) {
+            return text;
+        }
+        StringBuilder folded = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            folded.append(c >= FULL_WIDTH_ZERO && c <= FULL_WIDTH_NINE ? (char) ('0' + (c - FULL_WIDTH_ZERO)) : c);
+        }
+        return folded.toString();
     }
 
     private static List<int[]> validCnpjSpans(String text) {

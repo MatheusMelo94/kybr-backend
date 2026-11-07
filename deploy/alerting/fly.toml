@@ -1,0 +1,25 @@
+# Fly.io config: ALERTING (kybr-alerting), region gru. Private app: no public services or IPs.
+# Fly's managed Prometheus is free but has no alerting, so this app evaluates the rules in rules/
+# against https://api.fly.io/prometheus/<org>/ and e-mails the operator through Alertmanager.
+#   Deploy manually:  fly deploy --config deploy/alerting/fly.toml --remote-only
+#   Secrets (fly secrets import --app kybr-alerting): see deploy/alerting/thresholds.env.example
+app = "kybr-alerting"
+primary_region = "gru"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  FLY_ORG = "personal"
+  # Both apps: staging alerts are what the synthetic triggers prove before Preview -> staging.
+  APP_MATCH = "kybr-api|kybr-api-staging"
+
+# No [[services]] and no [checks]: vmalert (8880) and Alertmanager (9093) listen on 127.0.0.1 only, so
+# nothing in the Fly org can read the UI, /flags or the thresholds. Liveness: the entrypoint exits if
+# either process dies (Fly restarts the machine), and the always-firing Watchdog alert pings an external
+# dead-man check every 5 min (DEADMAN_WEBHOOK_URL, required). One always-on machine.
+# Local inspection: fly ssh console -a kybr-alerting -C "wget -qO- http://127.0.0.1:8880/api/v1/alerts"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

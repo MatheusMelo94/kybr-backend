@@ -1,0 +1,4 @@
+# Exceptions to scripts/ci/check-public-text.sh.
+# One entry per line: <path relative to the repo root>|<exact text allowed on that path's flagged line>
+# Put a comment above each entry saying why the text is legitimate. Never allowlist a reference to a
+# private document: rewrite it in plain words instead.

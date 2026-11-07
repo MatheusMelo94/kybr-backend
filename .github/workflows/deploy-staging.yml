@@ -58,6 +58,10 @@ jobs:
       - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # v1.6
         if: steps.gate.outputs.ready == 'true'
 
+      - name: Required Fly secrets present
+        if: steps.gate.outputs.ready == 'true'
+        run: scripts/ci/check-fly-secrets.sh "$FLY_APP" staging
+
       - name: Record last-known-good image
         id: lkg
         if: steps.gate.outputs.ready == 'true'

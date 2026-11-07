@@ -21,7 +21,7 @@ class OpenApiConfigIT extends WebIntegrationTest {
     void theYamlCarriesTheContractVersionTheErrorSchemaAndTheRequestIdHeader() {
         String yaml = http().get("/v3/api-docs.yaml").asString();
 
-        assertThat(yaml).contains("version: 0.1.0").contains("ErrorResponse:").contains("X-Request-Id:");
+        assertThat(yaml).contains("version: 0.2.0").contains("ErrorResponse:").contains("X-Request-Id:");
     }
 
     @Test
@@ -31,14 +31,23 @@ class OpenApiConfigIT extends WebIntegrationTest {
     }
 
     /**
-     * B0's contract has no paths: actuator, {@code /livez}, {@code /error} and the
-     * test-only probe controllers are all excluded. Per-operation decoration is unit-tested in
-     * {@link OpenApiConfigTest}.
+     * Only production controllers reach the contract: actuator, {@code /livez}, {@code /error} and
+     * the test-only probe controllers are all excluded, so every path is a seller-link route.
+     * Per-operation decoration is unit-tested in {@link OpenApiConfigTest}.
      */
     @Test
-    void theContractHasNoPathsSoActuatorProbesAndTestControllersAreExcluded() {
-        assertThat(docs().getMap("paths")).isNullOrEmpty();
-        assertThat(http().get("/v3/api-docs.yaml").asString()).doesNotContain("/test/").doesNotContain("/public/");
+    void onlyProductionRoutesReachTheContractSoActuatorProbesAndTestControllersAreExcluded() {
+        assertThat(docs().<String, Object>getMap("paths").keySet()).isNotEmpty()
+                .allSatisfy(path -> assertThat(path).matches("/public/v/\\{slug}(/(lookup|verify|cases/\\{token}"
+                        + "(/contact)?))?"));
+        assertThat(http().get("/v3/api-docs.yaml").asString()).doesNotContain("/test/").doesNotContain("-test")
+                .doesNotContain("probe").doesNotContain("/actuator").doesNotContain("/livez");
+    }
+
+    @Test
+    void schemaPropertiesUseTheWireNamesInSnakeCase() {
+        assertThat(docs().<String, Object>getMap("components.schemas.LinkInfoResponse.properties"))
+                .containsOnlyKeys("nome", "contato_vendedor");
     }
 
     @Test

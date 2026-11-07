@@ -25,6 +25,12 @@ public final class TestSecrets {
     public static final String HASH_SECRET_PREVIOUS = randomKey();
     /** A fresh Tink AES256_GCM JSON keyset, base64 (the KYBR_IDEMPOTENCY_ENC_KEY format). */
     public static final String IDEMPOTENCY_ENC_KEY = generateTinkKeyset();
+    /** A second, independent keyset (the KYBR_PII_ENC_KEY format): one keyset per data class. */
+    public static final String PII_ENC_KEY = generateTinkKeyset();
+    public static final String ADMIN_TOKEN = randomKey();
+    public static final String ADMIN_TOKEN_PREVIOUS = randomKey();
+    /** A synthetic provider API key; never a real one. */
+    public static final String CNPJA_API_KEY = randomKey();
 
     private TestSecrets() {
     }

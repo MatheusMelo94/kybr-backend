@@ -34,12 +34,13 @@ class AccessLogFilterIT extends WebIntegrationTest {
             Response response = http().header("X-Kybr-Client-IP", "198.51.100.4")
                     .get("/public/v/slug-a/cases/" + TOKEN + "?cnpj=" + CNPJ);
 
-            assertThat(response.statusCode()).isEqualTo(200);
+            // The real case route: an unknown slug is a 404, logged under the route template.
+            assertThat(response.statusCode()).isEqualTo(404);
             Map<String, String> line = onlyAccessLine(events);
             assertThat(line).containsEntry("method", "GET")
                     .containsEntry("route", "/public/v/{slug}/cases/{token}")
                     .containsEntry("query_params", "[\"cnpj\"]")
-                    .containsEntry("status", "200")
+                    .containsEntry("status", "404")
                     .containsEntry("request_id", response.header("X-Request-Id"))
                     .containsEntry("client_ip", "198.51.100.4")
                     .containsEntry("client_ip_source", "FORWARDED")
@@ -59,7 +60,7 @@ class AccessLogFilterIT extends WebIntegrationTest {
             ILoggingEvent event = events.events().getFirst();
             assertThat(event.getLevel()).isEqualTo(Level.INFO);
             assertThat(event.getFormattedMessage()).startsWith("event=access ")
-                    .contains("route=/public/v/{slug}/cases/{token}", "query_params=[\"cnpj\"]", "status=200")
+                    .contains("route=/public/v/{slug}/cases/{token}", "query_params=[\"cnpj\"]", "status=404")
                     .doesNotContain(TOKEN).doesNotContain(CNPJ);
         }
     }

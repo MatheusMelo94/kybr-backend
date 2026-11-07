@@ -50,7 +50,7 @@ class NoSecretInLogsAcceptanceIT extends AcceptanceTest {
             assertThat(line).containsEntry("route", "/public/v/{slug}/cases/{token}")
                     .containsEntry("query_params", "[\"cnpj\"]")
                     .containsEntry("method", "GET")
-                    .containsEntry("status", "200")
+                    .containsEntry("status", "404") // the real case route; slug "s" is unknown
                     .containsEntry("bff_key_slot", "CURRENT")
                     .containsKeys("duration_ms", "client_ip", "client_ip_source");
             assertThat(line.keySet()).containsExactly("event", "method", "route", "query_params", "status",

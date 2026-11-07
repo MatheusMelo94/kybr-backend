@@ -1,25 +1,34 @@
 package com.matheusmelo.kybr.config.filter;
 
+import com.matheusmelo.kybr.config.IndexDefinitionProvider;
 import com.matheusmelo.kybr.exception.ApiException;
 import com.matheusmelo.kybr.exception.ErrorCode;
+import com.matheusmelo.kybr.exception.ErrorResponseWriter;
+import com.matheusmelo.kybr.model.workspace.Workspace;
+import com.matheusmelo.kybr.service.MetricTags;
 import com.matheusmelo.kybr.service.idempotency.IdempotencyAttempt;
+import com.matheusmelo.kybr.service.idempotency.IdempotencyCompletion;
 import com.matheusmelo.kybr.service.idempotency.IdempotencyService;
 import com.matheusmelo.kybr.service.idempotency.IdempotencyService.Begin;
 import com.matheusmelo.kybr.service.idempotency.IdempotencyService.Execute;
 import com.matheusmelo.kybr.service.idempotency.IdempotencyService.Replay;
 import com.matheusmelo.kybr.service.idempotency.Idempotent;
 import com.matheusmelo.kybr.util.RequestHash;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.SmartInitializingSingleton;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -45,8 +54,19 @@ import tools.jackson.databind.json.JsonMapper;
  * </ol>
  *
  * <p>Errors thrown here (mismatch, in progress, lease lost, invalid key) render through the global
- * exception handler. A handler whose {@link Idempotent#binding()} has no bean fails startup, not
- * its first request.
+ * exception handler. A handler whose {@link Idempotent#binding()} has no bean, or a
+ * {@link IdempotencyCompletion#UNIQUE_KEY} handler whose collection declares no unique
+ * {@code idempotency_key} index, fails startup, not its first request.
+ *
+ * <p>A {@link IdempotencyCompletion#TRANSACTIONAL} handler that returns a 2xx without finishing
+ * its attempt is a programming error: the record is deleted (a retry re-executes rather than
+ * replaying an unprotected result), {@code event=idempotency_completion_missing} is logged and
+ * {@value #COMPLETION_MISSING_METRIC} increments. In the {@code test} profile the request also
+ * fails with a 500, so the endpoint's own test catches it; the response is held uncommitted there
+ * for that (bodies under the container's buffer size).
+ *
+ * <p>A handler that names an {@link Idempotent#outcomeMetric()} has its replays counted there as
+ * {@code replayed} and every 4xx, raised here or later, as {@code rejected}.
  */
 @Component
 public class IdempotencyInterceptor implements HandlerInterceptor, SmartInitializingSingleton {
@@ -56,36 +76,75 @@ public class IdempotencyInterceptor implements HandlerInterceptor, SmartInitiali
     /** The request attribute holding the current {@link IdempotencyAttempt}, for completeInTransaction. */
     public static final String ATTEMPT_ATTRIBUTE = IdempotencyInterceptor.class.getName() + ".attempt";
 
+    public static final String COMPLETION_MISSING_METRIC = "kybr.idempotency.completion_missing";
+
+    static final String REPLAYED = "replayed";
+    static final String REJECTED = "rejected";
+
+    private static final String KEY_FIELD = "idempotency_key";
+
     private final IdempotencyService service;
     private final JsonMapper jsonMapper;
     private final BeanFactory beans;
+    private final MeterRegistry meters;
+    private final ErrorResponseWriter errors;
+    private final boolean failMissingCompletion;
 
-    public IdempotencyInterceptor(IdempotencyService service, JsonMapper jsonMapper, BeanFactory beans) {
+    public IdempotencyInterceptor(IdempotencyService service, JsonMapper jsonMapper, BeanFactory beans,
+            MeterRegistry meters, ErrorResponseWriter errors, Environment environment) {
         this.service = service;
         this.jsonMapper = jsonMapper;
         this.beans = beans;
+        this.meters = meters;
+        this.errors = errors;
+        this.failMissingCompletion = environment.acceptsProfiles(Profiles.of("test"));
     }
 
-    /** Every handler mapping is initialised by now: resolve each {@link Idempotent} handler's binding bean once. */
+    /** Every handler mapping is initialised by now: check each {@link Idempotent} handler's declaration once. */
     @Override
     public void afterSingletonsInstantiated() {
         beans.getBeanProvider(RequestMappingInfoHandlerMapping.class).orderedStream()
                 .flatMap(mapping -> mapping.getHandlerMethods().values().stream())
-                .forEach(this::requireBindingBean);
+                .filter(handler -> handler.hasMethodAnnotation(Idempotent.class))
+                .forEach(handler -> {
+                    requireBindingBean(handler);
+                    requireUniqueKeyIndex(handler);
+                });
     }
 
     private void requireBindingBean(HandlerMethod handler) {
         Idempotent idempotent = handler.getMethodAnnotation(Idempotent.class);
-        if (idempotent == null) {
-            return;
-        }
         try {
             beans.getBean(idempotent.binding());
         } catch (BeansException e) {
-            throw new IllegalStateException("@Idempotent handler " + handler.getBeanType().getName() + "#"
-                    + handler.getMethod().getName() + " names binding " + idempotent.binding().getName()
-                    + ", which is not a single bean", e);
+            throw new IllegalStateException("@Idempotent handler " + name(handler) + " names binding "
+                    + idempotent.binding().getName() + ", which is not a single bean", e);
         }
+    }
+
+    private void requireUniqueKeyIndex(HandlerMethod handler) {
+        Idempotent idempotent = handler.getMethodAnnotation(Idempotent.class);
+        if (idempotent.completion() != IdempotencyCompletion.UNIQUE_KEY) {
+            return;
+        }
+        String collection = idempotent.uniqueKeyCollection();
+        if (collection.isBlank()) {
+            throw new IllegalStateException("@Idempotent handler " + name(handler)
+                    + " completes by UNIQUE_KEY but names no uniqueKeyCollection");
+        }
+        boolean declared = beans.getBeanProvider(IndexDefinitionProvider.class).orderedStream()
+                .filter(provider -> provider.collection().equals(collection))
+                .flatMap(provider -> provider.indexes().stream())
+                .anyMatch(index -> index.getIndexKeys().keySet().equals(Set.of(KEY_FIELD))
+                        && Boolean.TRUE.equals(index.getIndexOptions().get("unique")));
+        if (!declared) {
+            throw new IllegalStateException("@Idempotent handler " + name(handler) + " completes by UNIQUE_KEY, but "
+                    + collection + " declares no unique index on " + KEY_FIELD);
+        }
+    }
+
+    private static String name(HandlerMethod handler) {
+        return handler.getBeanType().getName() + "#" + handler.getMethod().getName();
     }
 
     @Override
@@ -96,6 +155,18 @@ public class IdempotencyInterceptor implements HandlerInterceptor, SmartInitiali
         if (idempotent == null) {
             return true;
         }
+        try {
+            return begin(request, response, idempotent);
+        } catch (ApiException e) {
+            if (e.code().status().is4xxClientError()) {
+                countOutcome(idempotent, request, REJECTED);
+            }
+            throw e;
+        }
+    }
+
+    private boolean begin(HttpServletRequest request, HttpServletResponse response, Idempotent idempotent)
+            throws IOException {
         List<String> keys = Collections.list(request.getHeaders(IdempotencyService.KEY_HEADER));
         if (keys.size() != 1) {
             throw new ApiException(ErrorCode.VALOR_INVALIDO, IdempotencyService.KEY_HEADER);
@@ -107,6 +178,7 @@ public class IdempotencyInterceptor implements HandlerInterceptor, SmartInitiali
 
         Begin begin = service.begin(idempotent.profile(), binding, keys.getFirst(), hash);
         if (begin instanceof Replay replay) {
+            countOutcome(idempotent, request, REPLAYED);
             replay(response, replay);
             return false;
         }
@@ -116,17 +188,30 @@ public class IdempotencyInterceptor implements HandlerInterceptor, SmartInitiali
         }
         request.setAttribute(ATTEMPT_ATTRIBUTE, ((Execute) begin).attempt());
         capture.startCapture();
+        if (failMissingCompletion && idempotent.completion() == IdempotencyCompletion.TRANSACTIONAL) {
+            capture.holdCommit();
+        }
         return true;
     }
 
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler,
             Exception ex) {
+        if (ex == null && response.getStatus() >= 400 && response.getStatus() < 500
+                && handler instanceof HandlerMethod method && method.hasMethodAnnotation(Idempotent.class)) {
+            countOutcome(method.getMethodAnnotation(Idempotent.class), request, REJECTED);
+        }
         if (!(request.getAttribute(ATTEMPT_ATTRIBUTE) instanceof IdempotencyAttempt attempt) || attempt.isFinished()) {
             return;
         }
         if (ex != null) {
             service.abandon(attempt);
+            return;
+        }
+        int status = response.getStatus();
+        if (status >= 200 && status < 300 && handler instanceof HandlerMethod method
+                && method.getMethodAnnotation(Idempotent.class).completion() == IdempotencyCompletion.TRANSACTIONAL) {
+            completionMissing(attempt, method, response);
             return;
         }
         CachedBodyFilter.CapturingResponse capture = CachedBodyFilter.capturingResponse(response);
@@ -135,6 +220,20 @@ public class IdempotencyInterceptor implements HandlerInterceptor, SmartInitiali
         } catch (ApiException e) {
             // The response is already on its way; a retry replays the winner or re-executes.
             log.warn("event=idempotency_complete_failed code={}", e.code());
+        }
+    }
+
+    private void completionMissing(IdempotencyAttempt attempt, HandlerMethod handler, HttpServletResponse response) {
+        service.abandon(attempt);
+        log.error("event=idempotency_completion_missing handler={}", name(handler));
+        meters.counter(COMPLETION_MISSING_METRIC).increment();
+        if (failMissingCompletion && !response.isCommitted()) {
+            try {
+                response.resetBuffer();
+                errors.write(response, ErrorCode.ERRO_INTERNO);
+            } catch (IOException e) {
+                log.warn("event=idempotency_completion_missing_write_failed error={}", e.getClass().getSimpleName());
+            }
         }
     }
 
@@ -151,6 +250,17 @@ public class IdempotencyInterceptor implements HandlerInterceptor, SmartInitiali
     private static Map<String, String> uriVariables(HttpServletRequest request) {
         Object variables = request.getAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE);
         return variables instanceof Map<?, ?> map ? (Map<String, String>) map : Map.of();
+    }
+
+    /** Counts on the handler's outcome metric, tagged with the resolved link when there is one. */
+    private void countOutcome(Idempotent idempotent, HttpServletRequest request, String resultado) {
+        if (idempotent.outcomeMetric().isEmpty()) {
+            return;
+        }
+        Workspace workspace = request.getAttribute(LinkSlugInterceptor.WORKSPACE_ATTRIBUTE) instanceof Workspace w
+                ? w : null;
+        meters.counter(idempotent.outcomeMetric(), MetricTags.SLUG, MetricTags.slug(workspace), "resultado",
+                resultado).increment();
     }
 
     private static void replay(HttpServletResponse response, Replay replay) throws IOException {

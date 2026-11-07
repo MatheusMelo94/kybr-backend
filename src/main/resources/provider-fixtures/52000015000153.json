@@ -1,0 +1,5 @@
+{
+  "sentinel": "qa-stub-body-sentinel",
+  "scenario": "provider unavailable",
+  "outcome": "unavailable"
+}

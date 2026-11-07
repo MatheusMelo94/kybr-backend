@@ -3,9 +3,11 @@ package com.matheusmelo.kybr.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
+import com.matheusmelo.kybr.config.KybrProperties.LimitWindow;
 import com.matheusmelo.kybr.config.KybrProperties.Route;
 import com.matheusmelo.kybr.config.KybrProperties.RouteLimit;
 import com.matheusmelo.kybr.support.ProfileBoot;
+import java.time.Duration;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -59,7 +61,7 @@ class ProfileConfigurationTest {
             Environment env = context.getEnvironment();
 
             assertThat(env.getProperty("management.server.port")).isEqualTo("8081");
-            assertThat(env.getProperty("management.endpoints.web.exposure.include")).isEqualTo("health,prometheus");
+            assertThat(env.getProperty("management.endpoints.web.exposure.include")).isEqualTo("health,prometheus,admin");
             assertThat(env.getProperty("management.endpoint.health.show-details")).isEqualTo("never");
             assertThat(env.getProperty("management.endpoint.health.show-components")).isEqualTo("never");
             assertThat(env.getProperty("management.endpoint.health.probes.enabled")).isEqualTo("true");
@@ -131,6 +133,89 @@ class ProfileConfigurationTest {
             assertThat(properties.limits().multipart())
                     .containsExactly(new RouteLimit(HttpMethod.POST, DOCUMENT_UPLOAD, DataSize.ofMegabytes(11)));
             assertThat(properties.logging().tokenPrefixes()).containsExactly("cases");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"local", "docker", "staging", "prod", "test"})
+    void everyProfileCarriesTheSellerLinkDefaults(String profile) {
+        try (ConfigurableApplicationContext context = start(profile)) {
+            KybrProperties properties = context.getBean(KybrProperties.class);
+            KybrProperties.LinkLimits limits = properties.link().limits();
+
+            assertThat(limits.lookupIp()).isEqualTo(new LimitWindow(5, Duration.ofMinutes(1)));
+            assertThat(limits.lookupIpDaily()).isEqualTo(new LimitWindow(30, Duration.ofDays(1)));
+            assertThat(limits.lookupIpUnknown()).isEqualTo(new LimitWindow(120, Duration.ofMinutes(1)));
+            assertThat(limits.verifyIp()).isEqualTo(new LimitWindow(10, Duration.ofMinutes(10)));
+            assertThat(limits.verifyIpUnknown()).isEqualTo(new LimitWindow(300, Duration.ofMinutes(10)));
+            assertThat(limits.verifyCnpj()).isEqualTo(new LimitWindow(3, Duration.ofHours(1)));
+            assertThat(limits.caseIp()).isEqualTo(new LimitWindow(300, Duration.ofMinutes(1)));
+            assertThat(limits.caseIpUnknown()).isEqualTo(new LimitWindow(1200, Duration.ofMinutes(1)));
+            assertThat(limits.contactIp()).isEqualTo(new LimitWindow(20, Duration.ofHours(1)));
+            assertThat(limits.contactIpUnknown()).isEqualTo(new LimitWindow(200, Duration.ofHours(1)));
+            assertThat(limits.contactCase()).isEqualTo(new LimitWindow(5, Duration.ofDays(1)));
+
+            KybrProperties.Budgets budgets = properties.link().budgets();
+            assertThat(budgets.d2Share()).isEqualTo(0.20);
+            assertThat(budgets.burst()).isEqualTo(2.0);
+            assertThat(budgets.lookupPerSlugDaily()).isEqualTo(50);
+            assertThat(budgets.verifyPerSlugDaily()).isEqualTo(30);
+            assertThat(budgets.noDataPerSlugDaily()).isEqualTo(20);
+            assertThat(budgets.cacheReadsPerSlugAlert()).isEqualTo(500);
+            assertThat(properties.link().reviewDeadline()).isEqualTo(Duration.ofDays(2));
+            assertThat(properties.link().regularizacao().receitaUrl().getScheme()).isEqualTo("https");
+
+            assertThat(properties.cache().positiveTtl()).isEqualTo(Duration.ofDays(30));
+            assertThat(properties.cache().negativeTtl()).isEqualTo(Duration.ofDays(1));
+            assertThat(properties.verification().workers()).isEqualTo(4);
+            assertThat(properties.verification().queue()).isEqualTo(100);
+            assertThat(properties.verification().maxAttempts()).isEqualTo(3);
+            assertThat(properties.verification().backoff())
+                    .containsExactly(Duration.ofSeconds(5), Duration.ofSeconds(30), Duration.ofMinutes(2));
+            assertThat(properties.verification().lease()).isEqualTo(Duration.ofSeconds(60));
+            assertThat(properties.verification().pollInterval()).isEqualTo(Duration.ofSeconds(5));
+            assertThat(properties.runtimeFlags().cacheTtl()).isEqualTo(Duration.ofSeconds(10));
+
+            KybrProperties.Cnpja cnpja = properties.cnpja();
+            assertThat(cnpja.timeouts().connect()).isEqualTo(Duration.ofSeconds(2));
+            assertThat(cnpja.timeouts().lookupRead()).isEqualTo(Duration.ofSeconds(3));
+            assertThat(cnpja.timeouts().workerRead()).isEqualTo(Duration.ofSeconds(8));
+            assertThat(cnpja.creditCosts()).isEqualTo(new KybrProperties.CreditCosts(1, 1, 1));
+            assertThat(cnpja.baseUrl().getScheme()).isEqualTo("https");
+            assertThat(cnpja.authHeader()).isEqualTo("Authorization");
+            assertThat(cnpja.addons()).isEqualTo(new KybrProperties.Cnpja.Addons(true, "BR"));
+
+            assertThat(properties.metrics().maxSlugTags()).isEqualTo(500);
+            assertThat(properties.admin().maxBody()).isEqualTo(DataSize.ofKilobytes(16));
+            assertThat(properties.clientIp().notExpected()).containsExactlyInAnyOrder(
+                    new Route(HttpMethod.GET, "/public/v/{slug}"),
+                    new Route(HttpMethod.GET, "/livez"),
+                    new Route(HttpMethod.POST, DOCUMENT_UPLOAD),
+                    new Route(HttpMethod.OPTIONS, DOCUMENT_UPLOAD));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"local", "docker", "staging", "test"})
+    void nonProdProfilesUseTheStubProviderAndAllowExplicitSlugs(String profile) {
+        try (ConfigurableApplicationContext context = start(profile)) {
+            KybrProperties properties = context.getBean(KybrProperties.class);
+
+            assertThat(properties.cnpja().mode()).isEqualTo(KybrProperties.Cnpja.Mode.STUB);
+            assertThat(properties.admin().allowExplicitSlug()).isTrue();
+            assertThat(properties.verification().pollerEnabled()).as("the poller is off only in tests")
+                    .isEqualTo(!"test".equals(profile));
+        }
+    }
+
+    @Test
+    void prodUsesTheLiveProviderAndNeverExplicitSlugs() {
+        try (ConfigurableApplicationContext context = start("prod")) {
+            KybrProperties properties = context.getBean(KybrProperties.class);
+
+            assertThat(properties.cnpja().mode()).isEqualTo(KybrProperties.Cnpja.Mode.LIVE);
+            assertThat(properties.admin().allowExplicitSlug()).isFalse();
+            assertThat(properties.verification().pollerEnabled()).isTrue();
         }
     }
 

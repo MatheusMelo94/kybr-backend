@@ -39,7 +39,44 @@ transforms:
     inputs: [parse]
     condition: 'starts_with(string(.fly.app.name) ?? "", "kybr-api")'
 
+  # Security events that exist only as log lines become a Prometheus counter, so the alerting app
+  # can alert on them: kybr_log_events_total{event, source_app}. Allowlisted names keep labels bounded.
+  log_events:
+    type: remap
+    inputs: [kybr_api_only]
+    drop_on_abort: true
+    source: |
+      msg = string(.app_event.message) ?? string(.message) ?? ""
+      m, err = parse_regex(msg, r'event=(?P<event>[a-z_]+)')
+      if err != null { abort }
+      . = { "event": m.event, "source_app": string(.fly.app.name) ?? "unknown" }
+
+  log_events_allowed:
+    type: filter
+    inputs: [log_events]
+    condition: >-
+      includes(["redirect_blocked", "cookie_blocked", "idempotency_lease_lost", "idempotency_decrypt_failed",
+      "idempotency_complete_failed", "client_ip_platform_absent", "unhandled_exception"], .event)
+
+  log_event_counter:
+    type: log_to_metric
+    inputs: [log_events_allowed]
+    metrics:
+      - type: counter
+        field: event
+        namespace: kybr
+        name: log_events_total
+        tags:
+          event: "{{ event }}"
+          source_app: "{{ source_app }}"
+
 sinks:
+  # Scraped by Fly's managed Prometheus ([metrics] in deploy/log-shipper/fly.toml); private network only.
+  log_event_metrics:
+    type: prometheus_exporter
+    inputs: [log_event_counter]
+    address: "[::]:9598"
+
   s3:
     type: aws_s3
     inputs: [kybr_api_only]

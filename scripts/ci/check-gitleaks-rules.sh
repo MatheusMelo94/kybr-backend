@@ -20,6 +20,11 @@ mkdir -p "$work/fixtures"
 printf 'KYBR_BFF_KEY_CURRENT=%s\n' "$(rand_b64url)" > "$work/fixtures/bff.env"
 printf 'KYBR_HASH_SECRET_PREVIOUS: %s\n' "$(rand_b64url)" > "$work/fixtures/hash.yml"
 printf 'idempotency_keyset = "%s"\n' "$(fake_keyset_b64)" > "$work/fixtures/keyset.txt"
+printf 'KYBR_PII_ENC_KEY=%s\n' "$(fake_keyset_b64)" > "$work/fixtures/pii.env"
+printf 'pii_keyset: "%s"\n' "$(fake_keyset_b64)" > "$work/fixtures/pii-keyset.yml"
+printf 'KYBR_ADMIN_TOKEN=%s\n' "$(rand_b64url)" > "$work/fixtures/admin.env"
+printf 'KYBR_ADMIN_TOKEN_PREVIOUS: %s\n' "$(rand_b64url)" > "$work/fixtures/admin-previous.yml"
+printf 'KYBR_CNPJA_API_KEY=%s\n' "$(rand_b64url)" > "$work/fixtures/cnpja.env"
 
 "$gitleaks" dir "$work/fixtures" --config .gitleaks.toml --no-banner --log-level error \
   --report-format json --report-path "$work/report.json" --exit-code 0
@@ -35,5 +40,10 @@ expect() { # file rule
 expect bff.env kybr-env-secret
 expect hash.yml kybr-env-secret
 expect keyset.txt tink-keyset-base64
+expect pii.env kybr-env-secret
+expect pii-keyset.yml tink-keyset-base64
+expect admin.env kybr-env-secret
+expect admin-previous.yml kybr-env-secret
+expect cnpja.env kybr-env-secret
 [ "$fail" -eq 0 ] && echo "gitleaks rule check passed (kybr-env-secret, tink-keyset-base64)."
 exit "$fail"

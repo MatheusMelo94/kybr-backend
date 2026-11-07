@@ -48,7 +48,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,prometheus
+        include: health,prometheus,admin # admin: operator operations, behind the admin token
   endpoint:
     health:
       show-details: never
@@ -83,6 +83,17 @@ kybr:
         pattern: "/public/v/{slug}/cases/{token}/documents"
   client-ip:
     platform-header: ${KYBR_CLIENT_IP_PLATFORM_HEADER:}
+    # Routes where the BFF legitimately sends no client IP (a cached read, the probe, the
+    # browser-direct upload): a missing client IP there is expected, not an alert.
+    not-expected:
+      - method: GET
+        pattern: "/public/v/{slug}"
+      - method: GET
+        pattern: /livez
+      - method: POST
+        pattern: "/public/v/{slug}/cases/{token}/documents"
+      - method: OPTIONS
+        pattern: "/public/v/{slug}/cases/{token}/documents"
   hashing:
     secret: ${KYBR_HASH_SECRET:}
     previous: ${KYBR_HASH_SECRET_PREVIOUS:}
@@ -99,3 +110,73 @@ kybr:
   logging:
     token-prefixes:
       - cases # the next path segment is a case token, redacted in logs
+  # Company-data provider. stub replays synthetic fixtures; live calls the provider (prod).
+  cnpja:
+    mode: ${KYBR_CNPJA_MODE:stub}
+    api-key: ${KYBR_CNPJA_API_KEY:} # required when live; header only, never in a URL or a log
+    base-url: https://api.cnpja.com
+    timeouts:
+      connect: 2s
+      lookup-read: 3s # company lookup, while the seller waits
+      worker-read: 8s # background verification
+    max-age-days: 45 # oldest provider-side cached record accepted
+    strategy: CACHE_IF_FRESH
+    credit-costs:
+      base: 1
+      simples: 1
+      ie: 1
+    rate-per-minute: ${KYBR_CNPJA_RATE_PER_MINUTE:60} # placeholder sized above a burst of verifications; the owner supplies the plan's real limit
+    monthly-credits: ${KYBR_CNPJA_MONTHLY_CREDITS:10000} # the plan's credits; no default in prod
+    auth-header: Authorization # carries the API key; the key itself is an environment-only secret
+    addons: # what a verification's full check asks for beyond the base record
+      simples: true # Simples/MEI regime
+      registrations: BR # state registrations: BR (every state) or a list such as SP,RJ
+  link:
+    # Request limits: limit per fixed window. The -unknown variants count per link when the client
+    # IP is unknown (a shared subject).
+    limits:
+      lookup-ip: { limit: 5, window: 1m }
+      lookup-ip-daily: { limit: 30, window: 1d }
+      lookup-ip-unknown: { limit: 120, window: 1m }
+      verify-ip: { limit: 10, window: 10m } # per (IP, link)
+      verify-ip-unknown: { limit: 300, window: 10m }
+      verify-cnpj: { limit: 3, window: 1h } # per (link, CNPJ)
+      case-ip: { limit: 300, window: 1m } # one polling tab is 30/min; room for shared IPs
+      case-ip-unknown: { limit: 1200, window: 1m }
+      contact-ip: { limit: 20, window: 1h }
+      contact-ip-unknown: { limit: 200, window: 1h }
+      contact-case: { limit: 5, window: 1d } # address changes per case
+    # Provider credit budgets: each one degrades (lookups cache-only, verifications deferred to
+    # manual review), none fails a request. Daily global budgets derive from monthly-credits.
+    budgets:
+      d2-share: 0.20 # share of monthly credits company lookups may spend
+      burst: 2.0 # a busy day may spend this many times the even daily rate
+      lookup-per-slug-daily: 50
+      verify-per-slug-daily: 30
+      no-data-per-slug-daily: 20
+      cache-reads-per-slug-alert: 500 # alert only
+    review-deadline: 2d
+    regularizacao:
+      receita-url: https://www.gov.br/receitafederal/pt-br/assuntos/orientacao-tributaria/cadastros/cnpj
+  cache:
+    positive-ttl: 30d
+    negative-ttl: 1d
+  verification:
+    workers: 4
+    queue: 100
+    max-attempts: 3
+    backoff: [5s, 30s, 2m]
+    lease: 60s
+    poll-interval: 5s
+    poller-enabled: true # off only in tests; prod refuses to start with it off
+  runtime-flags:
+    cache-ttl: 10s # kill switches take effect within this time
+  pii:
+    enc-key: ${KYBR_PII_ENC_KEY:}
+  admin:
+    token: ${KYBR_ADMIN_TOKEN:}
+    token-previous: ${KYBR_ADMIN_TOKEN_PREVIOUS:}
+    max-body: 16KB
+    allow-explicit-slug: false # true outside prod only; prod refuses to start with it on
+  metrics:
+    max-slug-tags: 500

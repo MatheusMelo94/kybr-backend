@@ -6,7 +6,8 @@ public enum SubjectKind {
     IP_UNKNOWN("ip-unknown"),
     SLUG("slug"),
     CNPJ("cnpj"),
-    ACCOUNT("account");
+    ACCOUNT("account"),
+    CASE("case");
 
     private final String prefix;
 

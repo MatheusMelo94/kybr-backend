@@ -2,9 +2,13 @@ package com.matheusmelo.kybr.config.filter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import ch.qos.logback.classic.Level;
 import com.matheusmelo.kybr.support.idempotency.IdempotencyProbeController;
+import com.matheusmelo.kybr.support.web.CapturedEvents;
 import com.matheusmelo.kybr.support.web.RawHttp;
 import com.matheusmelo.kybr.support.web.WebIntegrationTest;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.restassured.response.Response;
 import io.restassured.specification.RequestSpecification;
 import java.io.ByteArrayOutputStream;
@@ -21,12 +25,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /** At slice level: the idempotency web pipeline end to end. */
 class IdempotencyInterceptorIT extends WebIntegrationTest {
 
     private static final String BODY = "{\"name\":\"Loja Exemplo\",\"note\":\"synthetic\"}";
     private static final String KEY_HEADER = "Idempotency-Key";
+
+    @Autowired
+    private MeterRegistry meters;
 
     private String slug;
     private String key;
@@ -205,6 +213,25 @@ class IdempotencyInterceptorIT extends WebIntegrationTest {
     }
 
     @Test
+    void aTransactionalHandlerThatNeverCompletesFailsAndIsNotStored() {
+        double before = completionMissing();
+        String forgetful = "/public/v/" + slug + "/forgetful-test";
+        try (CapturedEvents events = CapturedEvents.of(IdempotencyInterceptor.class)) {
+            Response first = request().header(KEY_HEADER, key).body(BODY).post(forgetful);
+
+            assertEnvelope(first, 500, "ERRO_INTERNO");
+            assertThat(events.events()).anyMatch(event -> event.getLevel() == Level.ERROR
+                    && event.getFormattedMessage().startsWith("event=idempotency_completion_missing"));
+        }
+        assertThat(completionMissing()).isEqualTo(before + 1);
+
+        Response retry = request().header(KEY_HEADER, key).body(BODY).post(forgetful);
+
+        assertEnvelope(retry, 500, "ERRO_INTERNO");
+        assertThat(IdempotencyProbeController.calls(slug)).isEqualTo(2);
+    }
+
+    @Test
     void everyJsonContentTypeSpellingIsBufferedAndHashed() {
         Response first = request().header(KEY_HEADER, key).contentType("application/json;charset=UTF-8")
                 .body(BODY).post(path(slug));
@@ -261,6 +288,11 @@ class IdempotencyInterceptorIT extends WebIntegrationTest {
 
     private static String path(String targetSlug) {
         return "/public/v/" + targetSlug + "/verify-test";
+    }
+
+    private double completionMissing() {
+        Counter counter = meters.find("kybr.idempotency.completion_missing").counter();
+        return counter == null ? 0 : counter.count();
     }
 
     private static void assertEnvelope(Response response, int status, String code) {

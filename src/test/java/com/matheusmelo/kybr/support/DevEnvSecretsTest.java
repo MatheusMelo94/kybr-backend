@@ -19,12 +19,13 @@ class DevEnvSecretsTest {
     }
 
     @Test
-    void printsTheThreeRequiredSecretsAsEnvLines() {
+    void printsEveryRequiredSecretAsAnEnvLine() {
         List<String> lines = DevEnvSecrets.lines();
 
         assertThat(lines).allMatch(line -> line.matches("[A-Z_]+=\\S+"));
         assertThat(parse(lines)).containsOnlyKeys(
-                "KYBR_BFF_KEY_CURRENT", "KYBR_HASH_SECRET", "KYBR_IDEMPOTENCY_ENC_KEY");
+                "KYBR_BFF_KEY_CURRENT", "KYBR_HASH_SECRET", "KYBR_IDEMPOTENCY_ENC_KEY", "KYBR_PII_ENC_KEY",
+                "KYBR_ADMIN_TOKEN");
     }
 
     @Test
@@ -35,5 +36,9 @@ class DevEnvSecretsTest {
         assertThat(Base64.getUrlDecoder().decode(env.get("KYBR_HASH_SECRET"))).hasSizeGreaterThanOrEqualTo(32);
         assertThat(env.get("KYBR_BFF_KEY_CURRENT")).isNotEqualTo(env.get("KYBR_HASH_SECRET"));
         assertThatCode(() -> new ReplayBodyCipher(env.get("KYBR_IDEMPOTENCY_ENC_KEY"))).doesNotThrowAnyException();
+        assertThatCode(() -> new ReplayBodyCipher(env.get("KYBR_PII_ENC_KEY"))).as("an AEAD keyset too")
+                .doesNotThrowAnyException();
+        assertThat(env.get("KYBR_PII_ENC_KEY")).isNotEqualTo(env.get("KYBR_IDEMPOTENCY_ENC_KEY"));
+        assertThat(Base64.getUrlDecoder().decode(env.get("KYBR_ADMIN_TOKEN"))).hasSizeGreaterThanOrEqualTo(32);
     }
 }

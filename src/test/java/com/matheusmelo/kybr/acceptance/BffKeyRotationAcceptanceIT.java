@@ -79,7 +79,9 @@ class BffKeyRotationAcceptanceIT extends AcceptanceTest {
                 "--spring.mongodb.database=" + MongoIntegrationTest.database(),
                 "--kybr.bff.current=" + current,
                 "--kybr.hashing.secret=" + TestSecrets.HASH_SECRET,
-                "--kybr.idempotency.enc-key=" + TestSecrets.IDEMPOTENCY_ENC_KEY));
+                "--kybr.idempotency.enc-key=" + TestSecrets.IDEMPOTENCY_ENC_KEY,
+                "--kybr.pii.enc-key=" + TestSecrets.PII_ENC_KEY,
+                "--kybr.admin.token=" + TestSecrets.ADMIN_TOKEN));
         args.add("--kybr.bff.previous=" + previous);
         return new SpringApplicationBuilder(KybrApplication.class).profiles("test").run(args.toArray(String[]::new));
     }

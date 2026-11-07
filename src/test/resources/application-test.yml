@@ -8,3 +8,9 @@ spring:
 springdoc:
   api-docs:
     enabled: true
+
+kybr:
+  verification:
+    poller-enabled: false # background claims would race tests; a test that needs it turns it on
+  admin:
+    allow-explicit-slug: true

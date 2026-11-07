@@ -26,12 +26,13 @@ keywords = ["primarykeyid"]
 # The formats Kybr actually uses. Proven by scripts/ci/check-gitleaks-rules.sh (runtime fixtures).
 [[rules]]
 id = "tink-keyset-base64"
-description = "Google Tink JSON keyset, base64-encoded (the KYBR_IDEMPOTENCY_ENC_KEY format)"
+description = "Google Tink JSON keyset, base64-encoded (the KYBR_IDEMPOTENCY_ENC_KEY and KYBR_PII_ENC_KEY format)"
 regex = '''eyJwcmltYXJ5S2V5SWQi[A-Za-z0-9+/]{40,}={0,2}'''
 keywords = ["eyjwcmltyxj5s2v5swqi"]
 
 [[rules]]
 id = "kybr-env-secret"
 description = "A Kybr secret assigned in env, yml or properties form"
-regex = '''KYBR_(?:BFF_KEY|HASH_SECRET|IDEMPOTENCY_ENC_KEY)\w*\s*[=:]\s*["']?[A-Za-z0-9_+/=-]{20,}'''
-keywords = ["kybr_bff_key", "kybr_hash_secret", "kybr_idempotency_enc_key"]
+regex = '''KYBR_(?:BFF_KEY|HASH_SECRET|IDEMPOTENCY_ENC_KEY|PII_ENC_KEY|ADMIN_TOKEN|CNPJA_API_KEY)\w*\s*[=:]\s*["']?[A-Za-z0-9_+/=-]{20,}'''
+keywords = ["kybr_bff_key", "kybr_hash_secret", "kybr_idempotency_enc_key", "kybr_pii_enc_key", "kybr_admin_token",
+  "kybr_cnpja_api_key"]

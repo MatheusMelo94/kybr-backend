@@ -21,6 +21,8 @@ public final class DevEnvSecrets {
         return List.of(
                 "KYBR_BFF_KEY_CURRENT=" + TestSecrets.BFF_KEY_CURRENT,
                 "KYBR_HASH_SECRET=" + TestSecrets.HASH_SECRET,
-                "KYBR_IDEMPOTENCY_ENC_KEY=" + TestSecrets.IDEMPOTENCY_ENC_KEY);
+                "KYBR_IDEMPOTENCY_ENC_KEY=" + TestSecrets.IDEMPOTENCY_ENC_KEY,
+                "KYBR_PII_ENC_KEY=" + TestSecrets.PII_ENC_KEY,
+                "KYBR_ADMIN_TOKEN=" + TestSecrets.ADMIN_TOKEN);
     }
 }

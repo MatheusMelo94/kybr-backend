@@ -9,6 +9,7 @@ import com.matheusmelo.kybr.model.IdempotencyRecord;
 import com.matheusmelo.kybr.model.IdempotencyRecord.State;
 import com.matheusmelo.kybr.repository.IdempotencyRecordRepository;
 import com.matheusmelo.kybr.service.KeyHasher;
+import com.matheusmelo.kybr.service.TransactionRetry;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -139,7 +140,8 @@ public class IdempotencyService {
      * Runs {@code businessWrite} and the fenced completion in one MongoDB transaction, storing the
      * result serialised as JSON with {@code status}. If the callback throws, both roll back and the
      * record is deleted (a retry re-executes). If the lease was lost, the business write rolls back
-     * and {@link IdempotencyLeaseLostException} is thrown.
+     * and {@link IdempotencyLeaseLostException} is thrown. A transient transaction error (a write
+     * conflict) re-runs the whole transaction, callback included ({@link TransactionRetry}).
      */
     public <T> T completeInTransaction(IdempotencyAttempt attempt, int status, Supplier<T> businessWrite) {
         if (!isStorable(status)) {
@@ -147,14 +149,14 @@ public class IdempotencyService {
         }
         finish(attempt);
         try {
-            return transactions.execute(tx -> {
+            return TransactionRetry.DEFAULT.execute(() -> transactions.execute(tx -> {
                 T result = businessWrite.get();
                 byte[] body = encrypt(attempt, jsonMapper.writeValueAsBytes(result));
                 if (!repository.complete(attempt.recordId(), attempt.owner(), status, JSON, body)) {
                     throw leaseLost();
                 }
                 return result;
-            });
+            }));
         } catch (IdempotencyLeaseLostException e) {
             throw e;
         } catch (RuntimeException e) {

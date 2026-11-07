@@ -38,7 +38,10 @@ public class TestSecretsContextCustomizerFactory implements ContextCustomizerFac
             environment.getPropertySources().addFirst(new MapPropertySource("kybrTestSecrets", Map.of(
                     "kybr.bff.current", TestSecrets.BFF_KEY_CURRENT,
                     "kybr.hashing.secret", TestSecrets.HASH_SECRET,
-                    "kybr.idempotency.enc-key", TestSecrets.IDEMPOTENCY_ENC_KEY)));
+                    "kybr.idempotency.enc-key", TestSecrets.IDEMPOTENCY_ENC_KEY,
+                    "kybr.pii.enc-key", TestSecrets.PII_ENC_KEY,
+                    "kybr.admin.token", TestSecrets.ADMIN_TOKEN,
+                    "kybr.admin.token-previous", TestSecrets.ADMIN_TOKEN_PREVIOUS)));
             LogRedaction.configure(environment);
         }
 

@@ -160,6 +160,7 @@ public class CachedBodyFilter extends OncePerRequestFilter implements Ordered {
     public static final class CapturingResponse extends HttpServletResponseWrapper {
         private final ByteArrayOutputStream copy = new ByteArrayOutputStream();
         private volatile boolean capturing;
+        private volatile boolean holding;
         private ServletOutputStream stream;
         private PrintWriter writer;
         private boolean draining;
@@ -170,6 +171,14 @@ public class CachedBodyFilter extends OncePerRequestFilter implements Ordered {
 
         public void startCapture() {
             capturing = true;
+        }
+
+        /**
+         * Stops flushes from committing the response, so it can still be reset after the handler
+         * has written it. The container commits it when the request ends (or when its buffer fills).
+         */
+        public void holdCommit() {
+            holding = true;
         }
 
         /** What was written while capturing (writer drained first). */
@@ -231,7 +240,9 @@ public class CachedBodyFilter extends OncePerRequestFilter implements Ordered {
             if (writer != null) {
                 writer.flush();
             }
-            super.flushBuffer();
+            if (!holding) {
+                super.flushBuffer();
+            }
         }
 
         private final class TeeOutputStream extends ServletOutputStream {
@@ -259,7 +270,7 @@ public class CachedBodyFilter extends OncePerRequestFilter implements Ordered {
 
             @Override
             public void flush() throws IOException {
-                if (!draining) {
+                if (!draining && !holding) {
                     target.flush();
                 }
             }

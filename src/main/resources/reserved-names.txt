@@ -1,0 +1,26 @@
+# Words a workspace name or slug may not be or contain (matched on whole slug words).
+# Platform paths, operator words and our own brand. No customer names.
+admin
+administrador
+api
+app
+assets
+auth
+cdn
+conta
+docs
+help
+kybr
+login
+logout
+mail
+oficial
+painel
+public
+root
+seguranca
+static
+status
+suporte
+support
+www

@@ -38,7 +38,13 @@ class CpfMaskerTest {
                 // (e): accepted over-mask of an 11-digit phone-like run
                 Arguments.of("LOJA FONE 11987654321", "LOJA FONE " + MASK),
                 // two runs in one string
-                Arguments.of("A 12345678909 E B 98765432100", "A " + MASK + " E B " + MASK));
+                Arguments.of("A 12345678909 E B 98765432100", "A " + MASK + " E B " + MASK),
+                // full-width digits are folded to ASCII before matching
+                Arguments.of("FULANO \uFF11\uFF12\uFF13\uFF14\uFF15\uFF16\uFF17\uFF18\uFF19\uFF10\uFF19",
+                        "FULANO " + MASK),
+                Arguments.of("FULANO \uFF11\uFF12\uFF13.456.789-\uFF10\uFF19 LTDA", "FULANO " + MASK + " LTDA"),
+                // two CPFs glued into one 22-digit run: both halves are masked
+                Arguments.of("FULANO 1234567890998765432100", "FULANO " + MASK + MASK));
     }
 
     static Stream<String> unchangedVectors() {

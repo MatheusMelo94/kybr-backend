@@ -1,0 +1,206 @@
+# Alert rules for the Kybr API (Prometheus rule format, evaluated by vmalert against Fly's managed
+# Prometheus API). Rendered at container start: every T_* threshold comes from a Fly secret on the
+# alerting app (values are private; names in deploy/alerting/thresholds.env.example). Thresholds that
+# are fixed by design (> 0, >= 0.8, == 1) are literal. APP_MATCH selects the monitored apps.
+#
+# Labels: severity = critical | warning; signal = the signal name used by the synthetic-trigger
+# script (scripts/alerts/trigger.sh <signal>). Metric names follow Micrometer's Prometheus naming.
+groups:
+  # ---------------------------------------------------------------- seller link (D2/D3/E05) volume
+  - name: kybr-link-volume
+    interval: 1m
+    rules:
+      - alert: KybrLookupVolumePerSlugHigh
+        expr: sum by (app, slug) (increase(kybr_link_lookup_total{app=~"${APP_MATCH}"}[15m])) > ${T_LOOKUP_PER_SLUG_15M}
+        labels: { severity: warning, signal: lookup-volume }
+        annotations:
+          summary: "Company lookups on {{ $labels.slug }} ({{ $labels.app }}) above baseline: {{ $value | printf \"%.0f\" }} in 15 min"
+
+      - alert: KybrVerifyVolumePerSlugHigh
+        expr: sum by (app, slug) (increase(kybr_link_verify_total{app=~"${APP_MATCH}",resultado="accepted"}[15m])) > ${T_VERIFY_PER_SLUG_15M}
+        labels: { severity: warning, signal: verify-volume }
+        annotations:
+          summary: "Verifications on {{ $labels.slug }} ({{ $labels.app }}) above baseline: {{ $value | printf \"%.0f\" }} in 15 min"
+
+      - alert: KybrCacheReadsPerSlugHigh
+        expr: sum by (app, slug) (increase(kybr_link_lookup_cache_reads_total{app=~"${APP_MATCH}"}[24h])) > ${T_CACHE_READS_PER_SLUG_24H}
+        labels: { severity: warning, signal: cache-reads }
+        annotations:
+          summary: "Cache reads on {{ $labels.slug }} ({{ $labels.app }}) above threshold in 24 h: {{ $value | printf \"%.0f\" }}"
+
+      - alert: KybrContactChangesLimited
+        expr: sum by (app) (increase(kybr_link_contact_total{app=~"${APP_MATCH}",resultado="limited"}[1h])) > ${T_CONTACT_LIMITED_1H}
+        labels: { severity: warning, signal: contact-limited }
+        annotations:
+          summary: "Contact e-mail changes hitting the per-case limit ({{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 1 h"
+
+  # ---------------------------------------------------------------- 429s and client IP
+  - name: kybr-abuse
+    interval: 1m
+    rules:
+      - alert: KybrRateLimit429Spike
+        expr: sum by (app, policy) (increase(kybr_ratelimit_exceeded_total{app=~"${APP_MATCH}"}[5m])) > ${T_429_PER_POLICY_5M}
+        labels: { severity: warning, signal: rate-limit-429 }
+        annotations:
+          summary: "429 spike on policy {{ $labels.policy }} ({{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 5 min"
+
+      - alert: KybrClientIpAbsentWhereExpected
+        expr: sum by (app) (increase(kybr_client_ip_absent_total{app=~"${APP_MATCH}",esperado="true"}[5m])) > 0
+        labels: { severity: warning, signal: client-ip-absent }
+        annotations:
+          summary: "BFF calls without X-Kybr-Client-IP on routes that expect it ({{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 5 min"
+
+      - alert: KybrRateLimitIpUnknownHigh
+        expr: sum by (app, policy) (increase(kybr_ratelimit_ip_unknown_total{app=~"${APP_MATCH}"}[15m])) > ${T_IP_UNKNOWN_PER_POLICY_15M}
+        labels: { severity: warning, signal: ip-unknown }
+        annotations:
+          summary: "Shared-IP (ip-unknown) rate-limit subjects on {{ $labels.policy }} ({{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 15 min"
+
+      - alert: KybrPlatformHeaderInvalid
+        # "missing" also counts Fly's own health checks on /livez, so only invalid/multiple here;
+        # a missing header on any other route is the log event below.
+        expr: sum by (app, reason) (increase(kybr_client_ip_platform_absent_total{app=~"${APP_MATCH}",reason=~"invalid|multiple"}[5m])) > 0
+        labels: { severity: critical, signal: platform-header }
+        annotations:
+          summary: "Fly-Client-IP invalid or duplicated ({{ $labels.reason }}, {{ $labels.app }})"
+
+      - alert: KybrBffKeyRejectedSpike
+        expr: sum by (app) (increase(kybr_bff_key_rejected_total{app=~"${APP_MATCH}"}[5m])) > ${T_BFF_REJECTED_5M}
+        labels: { severity: warning, signal: bff-key-rejected }
+        annotations:
+          summary: "BFF key rejections ({{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 5 min"
+
+      - alert: KybrAdminAuthFailed
+        expr: sum by (app) (increase(kybr_admin_auth_failed_total{app=~"${APP_MATCH}"}[5m])) > 0
+        labels: { severity: critical, signal: admin-auth-failed }
+        annotations:
+          summary: "Failed admin authentication on the management port ({{ $labels.app }})"
+
+  # ---------------------------------------------------------------- provider credits, budgets, brakes
+  - name: kybr-provider
+    interval: 1m
+    rules:
+      - alert: KybrCreditsUsed80
+        expr: max by (app) (kybr_provider_credits_used_ratio{app=~"${APP_MATCH}"}) >= 0.8
+        labels: { severity: warning, signal: credits }
+        annotations:
+          summary: "Provider credits at {{ $value | humanizePercentage }} of the month ({{ $labels.app }})"
+
+      - alert: KybrCreditsExhausted
+        expr: max by (app) (kybr_provider_credits_used_ratio{app=~"${APP_MATCH}"}) >= 1
+        labels: { severity: critical, signal: credits }
+        annotations:
+          summary: "Provider credits exhausted ({{ $labels.app }}): lookups cache-only, verifications to manual review"
+
+      - alert: KybrBudgetWarning
+        expr: sum by (app, budget) (increase(kybr_provider_budget_warning_total{app=~"${APP_MATCH}"}[10m])) > 0
+        labels: { severity: warning, signal: budget }
+        annotations:
+          summary: "Budget {{ $labels.budget }} reached 80% ({{ $labels.app }})"
+
+      - alert: KybrBudgetExhausted
+        expr: sum by (app, budget) (increase(kybr_provider_budget_exhausted_total{app=~"${APP_MATCH}"}[10m])) > 0
+        labels: { severity: critical, signal: budget }
+        annotations:
+          summary: "Budget {{ $labels.budget }} exhausted ({{ $labels.app }}): degrading to cache-only / manual review"
+
+      - alert: KybrNoDataCapHit
+        expr: sum by (app, slug) (increase(kybr_verification_no_data_cap_total{app=~"${APP_MATCH}"}[10m])) > 0
+        labels: { severity: critical, signal: no-data-cap }
+        annotations:
+          summary: "No-data cap reached on {{ $labels.slug }} ({{ $labels.app }}): new verifications deferred"
+
+      - alert: KybrProviderSpendOff
+        expr: max by (app) (kybr_provider_spend_off{app=~"${APP_MATCH}"}) == 1
+        labels: { severity: critical, signal: spend-off }
+        annotations:
+          summary: "Provider spend brake is ON ({{ $labels.app }}): all verifications deferred, lookups cache-only"
+
+      - alert: KybrAutofillGlobalOff
+        # The global kill switch's state (1 = autofill off on every link).
+        expr: max by (app) (kybr_link_autofill_off{app=~"${APP_MATCH}"}) == 1
+        labels: { severity: critical, signal: autofill-off }
+        annotations:
+          summary: "Global autofill kill switch is ON ({{ $labels.app }}): every company lookup answers disabled"
+
+      - alert: KybrAutofillDisabledResponses
+        # Per-link switches have no gauge: this fires on the responses they cause (503 AUTOFILL_DESATIVADO).
+        expr: sum by (app, slug) (increase(kybr_link_lookup_total{app=~"${APP_MATCH}",resultado="disabled"}[5m])) > 0
+        labels: { severity: warning, signal: autofill-slug-off }
+        annotations:
+          summary: "Autofill is answering disabled on {{ $labels.slug }} ({{ $labels.app }}): a kill switch is off"
+
+      - alert: KybrProviderCallErrors
+        # found and not_found are successful calls; unsupported is an answer, and budget_denied never
+        # reached the provider. Errors and provider-side rate limiting are failures.
+        expr: sum by (app, tipo) (increase(kybr_provider_calls_total{app=~"${APP_MATCH}",resultado=~"error|rate_limited"}[10m])) > ${T_PROVIDER_ERRORS_10M}
+        labels: { severity: warning, signal: provider-errors }
+        annotations:
+          summary: "Provider calls failing ({{ $labels.tipo }}, {{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 10 min"
+
+  # ---------------------------------------------------------------- verification pipeline
+  - name: kybr-verification
+    interval: 1m
+    rules:
+      - alert: KybrVerificationFailed
+        expr: sum by (app, motivo) (increase(kybr_verification_failed_total{app=~"${APP_MATCH}"}[15m])) > 0
+        labels: { severity: warning, signal: verification-failed }
+        annotations:
+          summary: "Verifications failed to manual review ({{ $labels.motivo }}, {{ $labels.app }})"
+
+      - alert: KybrVerificationSlow
+        # p90 > 5 s, read exactly from the histogram's 5 s bucket: fewer than 90% of verifications in the
+        # window finished within 5 s (no interpolation between buckets).
+        expr: |
+          (sum by (app) (rate(kybr_verification_duration_seconds_bucket{app=~"${APP_MATCH}",le="5.0"}[10m]))
+            / sum by (app) (rate(kybr_verification_duration_seconds_count{app=~"${APP_MATCH}"}[10m]))) < 0.9
+        labels: { severity: warning, signal: verification-slow }
+        annotations:
+          summary: "Verification p90 above 5 s on {{ $labels.app }}: only {{ $value | humanizePercentage }} finished within 5 s (10 min)"
+
+      - alert: KybrIdempotencyCompletionMissing
+        expr: sum by (app) (increase(kybr_idempotency_completion_missing_total{app=~"${APP_MATCH}"}[10m])) > 0
+        labels: { severity: critical, signal: completion-missing }
+        annotations:
+          summary: "An idempotent endpoint returned without declaring completion ({{ $labels.app }})"
+
+  # ---------------------------------------------------------------- platform health
+  - name: kybr-platform
+    interval: 1m
+    rules:
+      - alert: Kybr5xxRateHigh
+        expr: |
+          (sum by (app) (rate(http_server_requests_seconds_count{app=~"${APP_MATCH}",status=~"5.."}[5m]))
+            / sum by (app) (rate(http_server_requests_seconds_count{app=~"${APP_MATCH}"}[5m]))) > ${T_5XX_RATIO_5M}
+          and sum by (app) (increase(http_server_requests_seconds_count{app=~"${APP_MATCH}",status=~"5.."}[5m])) >= ${T_5XX_MIN_COUNT_5M}
+        labels: { severity: critical, signal: http-5xx }
+        annotations:
+          summary: "5xx ratio {{ $value | humanizePercentage }} over 5 min ({{ $labels.app }})"
+
+      - alert: KybrProdMetricsMissing
+        # Prod never scales to zero; no series for 10 min means the scrape or the app is down.
+        expr: absent(kybr_provider_spend_off{app="kybr-api"})
+        for: 10m
+        labels: { severity: critical, signal: metrics-missing }
+        annotations:
+          summary: "No metrics from kybr-api for 10 min (app down or scrape broken)"
+
+  # ---------------------------------------------------------------- security log events (via the log shipper)
+  - name: kybr-log-events
+    interval: 1m
+    rules:
+      - alert: KybrSecurityLogEvent
+        expr: sum by (source_app, event) (increase(kybr_log_events_total{source_app=~"${APP_MATCH}",event=~"redirect_blocked|cookie_blocked|idempotency_lease_lost|idempotency_decrypt_failed|idempotency_complete_failed|client_ip_platform_absent|unhandled_exception"}[5m])) > 0
+        labels: { severity: critical, signal: log-event }
+        annotations:
+          summary: "Log event {{ $labels.event }} on {{ $labels.source_app }}: {{ $value | printf \"%.0f\" }} in 5 min"
+
+  # ---------------------------------------------------------------- alerting pipeline self-check
+  - name: kybr-alerting-watchdog
+    interval: 1m
+    rules:
+      - alert: Watchdog
+        expr: vector(1)
+        labels: { severity: none, signal: watchdog }
+        annotations:
+          summary: "Always firing: proves the alerting pipeline is alive (routed to the dead-man check only)"

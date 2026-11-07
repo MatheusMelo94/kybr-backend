@@ -11,10 +11,10 @@ import java.lang.annotation.Target;
  * in {@code IdempotencyInterceptor} before argument resolution and validation, so a replay beats
  * validation and any business error.
  *
- * <p>Rule for B1+: the endpoint either completes through
+ * <p>Every handler declares how it completes ({@link #completion()}, no default): through
  * {@link IdempotencyService#completeInTransaction} (attempt in the request attribute
- * {@code IdempotencyInterceptor.ATTEMPT_ATTRIBUTE}) or keeps the key on its primary document under
- * a unique index.
+ * {@code IdempotencyInterceptor.ATTEMPT_ATTRIBUTE}), or by keeping the key on its primary document
+ * under a unique index. A misdeclared handler fails startup or, at runtime, its request.
  */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
@@ -25,4 +25,20 @@ public @interface Idempotent {
 
     /** The bean that resolves the binding (slug, workspace, or a constant such as {@code signup}). */
     Class<? extends IdempotencyBindingResolver> binding();
+
+    /** How a successful attempt completes. Required, so the choice is made at every endpoint. */
+    IdempotencyCompletion completion();
+
+    /**
+     * The collection holding the key under a unique {@code idempotency_key} index; required with
+     * {@link IdempotencyCompletion#UNIQUE_KEY}, ignored otherwise.
+     */
+    String uniqueKeyCollection() default "";
+
+    /**
+     * A counter tagged {@code slug} and {@code resultado} that also counts this handler's replays
+     * ({@code replayed}) and refusals, any 4xx ({@code rejected}); empty for none. A replay answers
+     * before the link is resolved, so it is tagged with the unknown slug.
+     */
+    String outcomeMetric() default "";
 }

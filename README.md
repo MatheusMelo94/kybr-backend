@@ -52,14 +52,32 @@ Configuration comes from environment variables. `.env.example` lists all of them
 | `KYBR_HASH_SECRET_PREVIOUS` | no | The previous HMAC secret, set only while rotating |
 | `KYBR_IDEMPOTENCY_ENC_KEY` | yes | Encryption keyset for stored responses (a base64 Tink `AES256_GCM` JSON keyset) |
 | `KYBR_CLIENT_IP_PLATFORM_HEADER` | no | The hosting platform's client-IP header (empty locally) |
+| `KYBR_PII_ENC_KEY` | yes | Encryption keyset for stored personal data (a base64 Tink `AES256_GCM` JSON keyset, different from the idempotency keyset) |
+| `KYBR_ADMIN_TOKEN` | yes | Bearer token for the operator endpoint on the internal management port (base64url, at least 32 random bytes) |
+| `KYBR_ADMIN_TOKEN_PREVIOUS` | no | The previous operator token, set only while rotating |
+| `KYBR_CNPJA_MODE` | no | Company-data provider mode: `stub` (default everywhere except production) or `live` (default in production) |
+| `KYBR_CNPJA_API_KEY` | live | The provider's API key, required in `live` mode |
+| `KYBR_CNPJA_MONTHLY_CREDITS` | live | The provider plan's monthly credits, required in `live` mode (`10000` elsewhere) |
+| `KYBR_CNPJA_RATE_PER_MINUTE` | no | The provider plan's per-minute call limit (default `60`, a placeholder until the plan's value is known) |
 
 Generate a 32-byte value with `openssl rand 32 | basenc --base64url`.
+
+### Company-data provider
+
+Company lookups and verifications read company records from a provider (CNPJa). In `stub` mode, the default for local runs, tests and staging, the API answers from synthetic fixtures in `src/main/resources/provider-fixtures/`, one file per CNPJ, and makes no network call. None of the fixtures is a real company. A CNPJ without a fixture is "not found". `live` mode calls the provider and needs `KYBR_CNPJA_API_KEY` and `KYBR_CNPJA_MONTHLY_CREDITS`. Spending is bounded by credit budgets: when a budget runs out, lookups answer from the cache only and verifications go to manual review. No request fails because of a budget.
 
 ## API
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/livez` | none | Liveness probe: `200` with the status only |
+| `GET` | `/public/v/{slug}` | BFF key | Link info: the workspace's name and the seller contact |
+| `GET` | `/public/v/{slug}/lookup?cnpj=` | BFF key | Look up a company by CNPJ to prefill the seller's form |
+| `POST` | `/public/v/{slug}/verify` | BFF key | Start a verification; idempotent under `Idempotency-Key`. Answers `201` with the case token |
+| `GET` | `/public/v/{slug}/cases/{token}` | BFF key | Read a case: processing, or its result |
+| `PUT` | `/public/v/{slug}/cases/{token}/contact` | BFF key | Save the seller's contact e-mail |
+
+The seller-link routes are called by the frontend server, never by browsers directly. They answer `404 LINK_NAO_ENCONTRADO` for an unknown or disabled link. A verification runs in the background after the `201`, and the case read reports its progress. The full contract, with every error code, is in the OpenAPI document below.
 
 Readiness and metrics are served on the internal management port (`8081`) for the hosting platform's checks. They are not part of the public API.
 
@@ -100,10 +118,11 @@ src/main/java/com/matheusmelo/kybr/
   controller/   REST endpoints
   dto/          Request and response records (the public contract)
   exception/    Error codes, exceptions and the global error handler
+  mapper/       Entity to DTO conversion
   model/        Domain types and persisted documents
   repository/   Spring Data MongoDB repositories
   service/      Business logic
   util/         Pure, stateless helpers
 ```
 
-Architecture rules (layer boundaries) are enforced by ArchUnit tests under `src/test/java/.../arch/`.
+Architecture rules (layer boundaries, mappers at the DTO boundary, append-only audit records) are enforced by ArchUnit tests under `src/test/java/.../arch/`.

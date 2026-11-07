@@ -1,9 +1,14 @@
 package com.matheusmelo.kybr.support.idempotency;
 
-import com.matheusmelo.kybr.service.idempotency.Idempotent;
+import com.matheusmelo.kybr.config.filter.IdempotencyInterceptor;
+import com.matheusmelo.kybr.service.idempotency.IdempotencyAttempt;
+import com.matheusmelo.kybr.service.idempotency.IdempotencyCompletion;
 import com.matheusmelo.kybr.service.idempotency.IdempotencyLeaseLostException;
+import com.matheusmelo.kybr.service.idempotency.IdempotencyService;
+import com.matheusmelo.kybr.service.idempotency.Idempotent;
 import com.matheusmelo.kybr.service.idempotency.IdempotencyProfile;
 import com.matheusmelo.kybr.service.idempotency.SlugBindingResolver;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Constraint;
 import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;
@@ -36,6 +41,12 @@ public class IdempotencyProbeController {
     private static final Map<String, Boolean> FAIL_ONCE = new ConcurrentHashMap<>();
     private static volatile boolean strict;
 
+    private final IdempotencyService idempotency;
+
+    public IdempotencyProbeController(IdempotencyService idempotency) {
+        this.idempotency = idempotency;
+    }
+
     public record VerifyRequest(@NotBlank @Strict String name, String note) {
     }
 
@@ -44,9 +55,10 @@ public class IdempotencyProbeController {
 
     @PostMapping("/public/v/{slug}/verify-test")
     @ResponseStatus(HttpStatus.CREATED)
-    @Idempotent(profile = IdempotencyProfile.PUBLIC_VERIFY, binding = SlugBindingResolver.class)
-    VerifyResponse verify(@PathVariable String slug, @Valid @RequestBody VerifyRequest request)
-            throws InterruptedException {
+    @Idempotent(profile = IdempotencyProfile.PUBLIC_VERIFY, binding = SlugBindingResolver.class,
+            completion = IdempotencyCompletion.TRANSACTIONAL)
+    VerifyResponse verify(@PathVariable String slug, @Valid @RequestBody VerifyRequest request,
+            HttpServletRequest servletRequest) throws InterruptedException {
         int call = CALLS.computeIfAbsent(slug, s -> new AtomicInteger()).incrementAndGet();
         Long sleep = SLEEP_MILLIS.get(slug);
         if (sleep != null) {
@@ -55,6 +67,18 @@ public class IdempotencyProbeController {
         if (FAIL_ONCE.remove(slug) != null) {
             throw new IllegalStateException("synthetic handler failure");
         }
+        IdempotencyAttempt attempt = (IdempotencyAttempt) servletRequest.getAttribute(
+                IdempotencyInterceptor.ATTEMPT_ATTRIBUTE);
+        return idempotency.completeInTransaction(attempt, 201, () -> new VerifyResponse(slug, request.name(), call));
+    }
+
+    /** Declares a transactional completion but never completes: the runtime guard must catch it. */
+    @PostMapping("/public/v/{slug}/forgetful-test")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Idempotent(profile = IdempotencyProfile.PUBLIC_VERIFY, binding = SlugBindingResolver.class,
+            completion = IdempotencyCompletion.TRANSACTIONAL)
+    VerifyResponse forgetful(@PathVariable String slug, @Valid @RequestBody VerifyRequest request) {
+        int call = CALLS.computeIfAbsent(slug, s -> new AtomicInteger()).incrementAndGet();
         return new VerifyResponse(slug, request.name(), call);
     }
 

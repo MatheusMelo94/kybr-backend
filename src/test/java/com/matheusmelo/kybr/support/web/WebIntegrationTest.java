@@ -10,19 +10,24 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Import;
 
 /**
  * Base for web integration tests: the full app on a random port (the management port is
  * randomised too), real MongoDB, driven over HTTP with REST Assured, redirects never followed.
  *
- * <p>Every subclass shares one cached context; don't add per-class properties or beans.
+ * <p>Every subclass shares one cached context; don't add per-class properties or beans. The rate
+ * limiter reads {@link LimiterClock}, which a test may freeze to keep its calls in one window.
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = {
     // A per-route body limit override (the 3 MiB test route).
     "kybr.limits.routes[0].method=POST",
     "kybr.limits.routes[0].pattern=/test/web/large",
-    "kybr.limits.routes[0].max-body=3MB"
+    "kybr.limits.routes[0].max-body=3MB",
+    // The production exposure plus a test-only endpoint that no security rule names.
+    "management.endpoints.web.exposure.include=health,prometheus,admin," + ManagementProbeEndpoint.ID
 })
+@Import(LimiterClockConfiguration.class)
 public abstract class WebIntegrationTest extends MongoIntegrationTest {
 
     public static final String BFF_KEY_HEADER = "X-Kybr-BFF-Key";

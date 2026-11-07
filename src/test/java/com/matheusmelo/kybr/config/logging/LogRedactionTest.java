@@ -50,6 +50,21 @@ class LogRedactionTest {
     }
 
     @Test
+    void masksTheProviderKeyThePiiKeysetAndTheAdminTokens() {
+        MockEnvironment env = new MockEnvironment()
+                .withProperty("kybr.cnpja.api-key", TestSecrets.CNPJA_API_KEY)
+                .withProperty("kybr.pii.enc-key", TestSecrets.PII_ENC_KEY)
+                .withProperty("kybr.admin.token", TestSecrets.ADMIN_TOKEN)
+                .withProperty("kybr.admin.token-previous", TestSecrets.ADMIN_TOKEN_PREVIOUS);
+
+        LogRedactor redactor = LogRedaction.from(env);
+
+        assertThat(redactor.redact("a " + TestSecrets.CNPJA_API_KEY + " b " + TestSecrets.PII_ENC_KEY + " c "
+                + TestSecrets.ADMIN_TOKEN + " d " + TestSecrets.ADMIN_TOKEN_PREVIOUS))
+                .isEqualTo("a [REDACTED] b [REDACTED] c [REDACTED] d [REDACTED]");
+    }
+
+    @Test
     void aMongoUriWithoutCredentialsAddsNoLiteral() {
         MockEnvironment env = new MockEnvironment()
                 .withProperty("spring.mongodb.uri", "mongodb://localhost:27017/kybr?replicaSet=rs0");

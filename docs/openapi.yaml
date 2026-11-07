@@ -1,13 +1,1204 @@
 openapi: 3.1.0
 info:
   title: Kybr API
-  version: 0.1.0
+  description: |-
+    The seller link lives under the unversioned base path `/public/v/{slug}`. A breaking change would ship as `/public/v2/{slug}/...` next to it, never in place.
+
+    Every call comes from the link's server with `X-Kybr-BFF-Key`; calls that are rate-limited or audited also carry `X-Kybr-Client-IP`. Errors use the `ErrorResponse` envelope: branch on `code`, never on `message`. Every response carries `X-Request-Id`, and every 429 carries `Retry-After` in seconds. Timestamps are ISO 8601 with an offset. CNPJs are 14 upper-case characters without punctuation, numeric or alphanumeric.
+  version: 0.2.0
 servers:
 - url: https://api.kybr.com.br
 - url: https://api-staging.kybr.com.br
-paths: {}
+tags:
+- name: Seller link
+  description: "The public seller link: link info, company lookup, verification start,\
+    \ case read and the seller's contact e-mail. Called server to server by the link's\
+    \ frontend."
+paths:
+  /public/v/{slug}/cases/{token}/contact:
+    put:
+      tags:
+      - Seller link
+      summary: Save the seller's contact e-mail
+      description: "Stores the address for messages about this case only; the case\
+        \ read then shows it masked. Sending the current address again changes nothing.\
+        \ Checks run in this order: slug, client limit, case, address, decided case,\
+        \ then the per-case change limit."
+      operationId: changeContact
+      parameters:
+      - $ref: "#/components/parameters/X-Kybr-BFF-Key"
+      - $ref: "#/components/parameters/X-Kybr-Client-IP"
+      - name: slug
+        in: path
+        description: "The link's slug: 1 to 64 characters of `[a-z0-9-]`, starting\
+          \ and ending with a letter or digit. Anything else is 404 `LINK_NAO_ENCONTRADO`."
+        required: true
+        schema:
+          type: string
+          pattern: "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+      - name: token
+        in: path
+        description: "The case token returned when the verification started. Anything\
+          \ that doesn't match `^[A-Za-z0-9_-]{22,64}$` is 404 `CASO_NAO_ENCONTRADO`."
+        required: true
+        schema:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{22,64}$"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactRequest"
+        required: true
+      responses:
+        "204":
+          description: Saved (or unchanged).
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+        "400":
+          description: "- `REQUISICAO_INVALIDA`: malformed JSON (including duplicate\
+            \ keys or trailing content), a missing body, or a path that isn't normalised."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                REQUISICAO_INVALIDA:
+                  value:
+                    code: REQUISICAO_INVALIDA
+                    message: Malformed request.
+        "403":
+          description: "- `BFF_KEY_AUSENTE`: `X-Kybr-BFF-Key` is missing or wrong\
+            \ (the same body either way)."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                BFF_KEY_AUSENTE:
+                  value:
+                    code: BFF_KEY_AUSENTE
+                    message: Forbidden.
+        "404":
+          description: |-
+            - `LINK_NAO_ENCONTRADO`: the slug is unknown or malformed, the link isn't set up yet, or it is disabled. Decided from the slug alone, before anything else in the request is read.
+            - `CASO_NAO_ENCONTRADO`: the token is unknown or belongs to another link (the same response either way).
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                LINK_NAO_ENCONTRADO:
+                  value:
+                    code: LINK_NAO_ENCONTRADO
+                    message: Link not found.
+                CASO_NAO_ENCONTRADO:
+                  value:
+                    code: CASO_NAO_ENCONTRADO
+                    message: Case not found.
+        "409":
+          description: "- `CASO_DECIDIDO`: the case is already approved or blocked."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                CASO_DECIDIDO:
+                  value:
+                    code: CASO_DECIDIDO
+                    message: Case already decided.
+        "413":
+          description: "- `REQUISICAO_GRANDE`: the body is over 1 MiB."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                REQUISICAO_GRANDE:
+                  value:
+                    code: REQUISICAO_GRANDE
+                    message: Request too large.
+        "415":
+          description: "- `MIDIA_NAO_SUPORTADA`: the body isn't `application/json`."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                MIDIA_NAO_SUPORTADA:
+                  value:
+                    code: MIDIA_NAO_SUPORTADA
+                    message: Unsupported media type.
+        "422":
+          description: |-
+            - `EMAIL_INVALIDO` (`field: email`): missing, not a string, over 254 characters, with control or format characters, or not a plain address.
+            - `VALOR_INVALIDO`: an unknown property.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                EMAIL_INVALIDO:
+                  value:
+                    code: EMAIL_INVALIDO
+                    message: Invalid e-mail address.
+                VALOR_INVALIDO:
+                  value:
+                    code: VALOR_INVALIDO
+                    message: Invalid value.
+        "429":
+          description: "- `LIMITE_TENTATIVAS`: too many requests from this client,\
+            \ or too many address changes on this case today."
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying (digits only).
+              schema:
+                type: integer
+                format: int32
+                minimum: 1
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                LIMITE_TENTATIVAS:
+                  value:
+                    code: LIMITE_TENTATIVAS
+                    message: Too many attempts.
+        "500":
+          description: "- `ERRO_INTERNO`: an unexpected error. No detail is given."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                ERRO_INTERNO:
+                  value:
+                    code: ERRO_INTERNO
+                    message: Internal error.
+        "503":
+          description: "- `INDISPONIVEL`: the database is unavailable. Retry later."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                INDISPONIVEL:
+                  value:
+                    code: INDISPONIVEL
+                    message: Service unavailable.
+        default:
+          description: Error envelope
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /public/v/{slug}/verify:
+    post:
+      tags:
+      - Seller link
+      summary: Start a verification
+      description: "Creates a case for the company and starts verifying it; read the\
+        \ result with the returned token. A valid CNPJ the data source doesn't know\
+        \ is still accepted and goes to human review. `ref` and `ext_id` are stored\
+        \ untouched and never echoed. When several fields are invalid, the first in\
+        \ `cnpj`, `responsavel`, `ref`, `ext_id` order is reported."
+      operationId: verify
+      parameters:
+      - $ref: "#/components/parameters/X-Kybr-BFF-Key"
+      - $ref: "#/components/parameters/X-Kybr-Client-IP"
+      - name: slug
+        in: path
+        description: "The link's slug: 1 to 64 characters of `[a-z0-9-]`, starting\
+          \ and ending with a letter or digit. Anything else is 404 `LINK_NAO_ENCONTRADO`."
+        required: true
+        schema:
+          type: string
+          pattern: "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+      - name: Idempotency-Key
+        in: header
+        description: "A UUID made fresh for each attempt and reused only to retry\
+          \ after an unknown outcome. For 10 minutes, the same key with the same body\
+          \ on the same slug replays the first response without creating another case\
+          \ or counting against a limit; the same key with a different body is 422.\
+          \ Any 2xx, and any 4xx other than 401, 408 and 429, is replayed (a 404 included);\
+          \ 401, 408, 429 and 5xx are never stored, so the same key runs again."
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyRequest"
+        required: true
+      responses:
+        "201":
+          description: The case was created.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyResponse"
+        "400":
+          description: "- `REQUISICAO_INVALIDA`: malformed JSON (including duplicate\
+            \ keys or trailing content), a missing body, or a path that isn't normalised."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                REQUISICAO_INVALIDA:
+                  value:
+                    code: REQUISICAO_INVALIDA
+                    message: Malformed request.
+        "403":
+          description: "- `BFF_KEY_AUSENTE`: `X-Kybr-BFF-Key` is missing or wrong\
+            \ (the same body either way)."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                BFF_KEY_AUSENTE:
+                  value:
+                    code: BFF_KEY_AUSENTE
+                    message: Forbidden.
+        "404":
+          description: "- `LINK_NAO_ENCONTRADO`: the slug is unknown or malformed,\
+            \ the link isn't set up yet, or it is disabled. Decided from the slug\
+            \ alone, before anything else in the request is read."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                LINK_NAO_ENCONTRADO:
+                  value:
+                    code: LINK_NAO_ENCONTRADO
+                    message: Link not found.
+        "406":
+          description: "- `FORMATO_NAO_ACEITO`: `Accept` excludes `application/json`\
+            \ (the body is still the JSON envelope)."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                FORMATO_NAO_ACEITO:
+                  value:
+                    code: FORMATO_NAO_ACEITO
+                    message: Response format not acceptable.
+        "413":
+          description: "- `REQUISICAO_GRANDE`: the body is over 1 MiB."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                REQUISICAO_GRANDE:
+                  value:
+                    code: REQUISICAO_GRANDE
+                    message: Request too large.
+        "415":
+          description: "- `MIDIA_NAO_SUPORTADA`: the body isn't `application/json`."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                MIDIA_NAO_SUPORTADA:
+                  value:
+                    code: MIDIA_NAO_SUPORTADA
+                    message: Unsupported media type.
+        "422":
+          description: |-
+            - `CNPJ_INVALIDO` (`field: cnpj`): missing, not a string, not canonical, or a wrong check digit. 422 here; 400 on the lookup, where the CNPJ is a query parameter.
+            - `RESPONSAVEL_INVALIDO` (`field: responsavel`): missing, not a string, fewer than two words, over 120 characters, or characters other than letters, space, `'`, `-` and `.`.
+            - `VALOR_INVALIDO`: `ref` or `ext_id` over 256 characters or not printable ASCII (`field` names it); an unknown property; or an `Idempotency-Key` that is missing, not a UUID, the nil or max UUID, or reused with a different body (`field: Idempotency-Key`).
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                CNPJ_INVALIDO:
+                  value:
+                    code: CNPJ_INVALIDO
+                    message: Invalid CNPJ.
+                RESPONSAVEL_INVALIDO:
+                  value:
+                    code: RESPONSAVEL_INVALIDO
+                    message: Invalid responsible person.
+                VALOR_INVALIDO:
+                  value:
+                    code: VALOR_INVALIDO
+                    message: Invalid value.
+        "429":
+          description: |-
+            - `LIMITE_CNPJ`: the same CNPJ was submitted too often on this link.
+            - `LIMITE_TENTATIVAS`: too many verifications from this client on this link.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying (digits only).
+              schema:
+                type: integer
+                format: int32
+                minimum: 1
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                LIMITE_CNPJ:
+                  value:
+                    code: LIMITE_CNPJ
+                    message: Too many attempts for this CNPJ.
+                LIMITE_TENTATIVAS:
+                  value:
+                    code: LIMITE_TENTATIVAS
+                    message: Too many attempts.
+        "500":
+          description: "- `ERRO_INTERNO`: an unexpected error. No detail is given."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                ERRO_INTERNO:
+                  value:
+                    code: ERRO_INTERNO
+                    message: Internal error.
+        "503":
+          description: "- `INDISPONIVEL`: the database is unavailable, or a request\
+            \ with the same `Idempotency-Key` is still running (then `Retry-After:\
+            \ 1`; retry with the same key)."
+          headers:
+            Retry-After:
+              description: "Seconds to wait before retrying with the same key, when\
+                \ the same key is still running."
+              style: simple
+              schema:
+                type: integer
+                minimum: 1
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                INDISPONIVEL:
+                  value:
+                    code: INDISPONIVEL
+                    message: Service unavailable.
+        default:
+          description: Error envelope
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /public/v/{slug}:
+    get:
+      tags:
+      - Seller link
+      summary: Link info
+      description: "The workspace's name and how the seller reaches it. Not cached\
+        \ on the server, so a change is visible on the next call. The frontend caches\
+        \ it per slug and sends no client IP."
+      operationId: info
+      parameters:
+      - $ref: "#/components/parameters/X-Kybr-BFF-Key"
+      - name: slug
+        in: path
+        description: "The link's slug: 1 to 64 characters of `[a-z0-9-]`, starting\
+          \ and ending with a letter or digit. Anything else is 404 `LINK_NAO_ENCONTRADO`."
+        required: true
+        schema:
+          type: string
+          pattern: "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+      responses:
+        "200":
+          description: The link's info.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkInfoResponse"
+        "400":
+          description: "- `REQUISICAO_INVALIDA`: a path that isn't normalised."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                REQUISICAO_INVALIDA:
+                  value:
+                    code: REQUISICAO_INVALIDA
+                    message: Malformed request.
+        "403":
+          description: "- `BFF_KEY_AUSENTE`: `X-Kybr-BFF-Key` is missing or wrong\
+            \ (the same body either way)."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                BFF_KEY_AUSENTE:
+                  value:
+                    code: BFF_KEY_AUSENTE
+                    message: Forbidden.
+        "404":
+          description: "- `LINK_NAO_ENCONTRADO`: the slug is unknown or malformed,\
+            \ the link isn't set up yet, or it is disabled. Decided from the slug\
+            \ alone, before anything else in the request is read."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                LINK_NAO_ENCONTRADO:
+                  value:
+                    code: LINK_NAO_ENCONTRADO
+                    message: Link not found.
+        "406":
+          description: "- `FORMATO_NAO_ACEITO`: `Accept` excludes `application/json`\
+            \ (the body is still the JSON envelope)."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                FORMATO_NAO_ACEITO:
+                  value:
+                    code: FORMATO_NAO_ACEITO
+                    message: Response format not acceptable.
+        "500":
+          description: "- `ERRO_INTERNO`: an unexpected error. No detail is given."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                ERRO_INTERNO:
+                  value:
+                    code: ERRO_INTERNO
+                    message: Internal error.
+        "503":
+          description: "- `INDISPONIVEL`: the database is unavailable. Retry later."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                INDISPONIVEL:
+                  value:
+                    code: INDISPONIVEL
+                    message: Service unavailable.
+        default:
+          description: Error envelope
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /public/v/{slug}/lookup:
+    get:
+      tags:
+      - Seller link
+      summary: Look up a company
+      description: "Fills in the company for the seller to confirm: its name (any\
+        \ CPF masked), town, state and main activity. Answered from a local cache\
+        \ first. Checks run in this order: slug, autofill switches, CNPJ, client limits,\
+        \ then the lookup. A failed lookup never blocks starting the verification."
+      operationId: lookup
+      parameters:
+      - $ref: "#/components/parameters/X-Kybr-BFF-Key"
+      - $ref: "#/components/parameters/X-Kybr-Client-IP"
+      - name: slug
+        in: path
+        description: "The link's slug: 1 to 64 characters of `[a-z0-9-]`, starting\
+          \ and ending with a letter or digit. Anything else is 404 `LINK_NAO_ENCONTRADO`."
+        required: true
+        schema:
+          type: string
+          pattern: "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+      - name: cnpj
+        in: query
+        description: "The company's CNPJ, canonical: 14 upper-case characters, no\
+          \ punctuation, valid check digits; numeric or alphanumeric. The only query\
+          \ parameter."
+        required: true
+        schema:
+          type: string
+          example: 12ABC34501DE35
+          pattern: "^[0-9A-Z]{12}[0-9]{2}$"
+      responses:
+        "200":
+          description: The company.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LookupResponse"
+        "400":
+          description: |-
+            - `CNPJ_INVALIDO` (`field: cnpj`): missing, repeated, not canonical (lower case, punctuation), 14 identical characters, or a wrong check digit. 400 here, where the CNPJ is a query parameter; 422 on verify.
+            - `REQUISICAO_INVALIDA`: a path that isn't normalised.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                CNPJ_INVALIDO:
+                  value:
+                    code: CNPJ_INVALIDO
+                    message: Invalid CNPJ.
+                REQUISICAO_INVALIDA:
+                  value:
+                    code: REQUISICAO_INVALIDA
+                    message: Malformed request.
+        "403":
+          description: "- `BFF_KEY_AUSENTE`: `X-Kybr-BFF-Key` is missing or wrong\
+            \ (the same body either way)."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                BFF_KEY_AUSENTE:
+                  value:
+                    code: BFF_KEY_AUSENTE
+                    message: Forbidden.
+        "404":
+          description: |-
+            - `LINK_NAO_ENCONTRADO`: the slug is unknown or malformed, the link isn't set up yet, or it is disabled. Decided from the slug alone, before anything else in the request is read.
+            - `EMPRESA_NAO_ENCONTRADA`: a valid CNPJ with no company data.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                LINK_NAO_ENCONTRADO:
+                  value:
+                    code: LINK_NAO_ENCONTRADO
+                    message: Link not found.
+                EMPRESA_NAO_ENCONTRADA:
+                  value:
+                    code: EMPRESA_NAO_ENCONTRADA
+                    message: Company not found.
+        "406":
+          description: "- `FORMATO_NAO_ACEITO`: `Accept` excludes `application/json`\
+            \ (the body is still the JSON envelope)."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                FORMATO_NAO_ACEITO:
+                  value:
+                    code: FORMATO_NAO_ACEITO
+                    message: Response format not acceptable.
+        "429":
+          description: "- `LIMITE_CONSULTAS`: too many lookups from this client (per\
+            \ minute or per day)."
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying (digits only).
+              schema:
+                type: integer
+                format: int32
+                minimum: 1
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                LIMITE_CONSULTAS:
+                  value:
+                    code: LIMITE_CONSULTAS
+                    message: Too many lookups.
+        "500":
+          description: "- `ERRO_INTERNO`: an unexpected error. No detail is given."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                ERRO_INTERNO:
+                  value:
+                    code: ERRO_INTERNO
+                    message: Internal error.
+        "503":
+          description: |-
+            - `AUTOFILL_DESATIVADO`: lookups are switched off (for this link or for every link), or the company isn't cached and this link may only read the cache right now. Checked before the CNPJ.
+            - `INDISPONIVEL`: the data source failed, timed out or returned an incomplete record, or the database is unavailable.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                AUTOFILL_DESATIVADO:
+                  value:
+                    code: AUTOFILL_DESATIVADO
+                    message: Autofill unavailable.
+                INDISPONIVEL:
+                  value:
+                    code: INDISPONIVEL
+                    message: Service unavailable.
+        default:
+          description: Error envelope
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /public/v/{slug}/cases/{token}:
+    get:
+      tags:
+      - Seller link
+      summary: Read a case
+      description: The case's state and its seller-facing result. Polled while the
+        verification runs. Readable even when the link has been disabled.
+      operationId: readCase
+      parameters:
+      - $ref: "#/components/parameters/X-Kybr-BFF-Key"
+      - $ref: "#/components/parameters/X-Kybr-Client-IP"
+      - name: slug
+        in: path
+        description: "The link's slug: 1 to 64 characters of `[a-z0-9-]`, starting\
+          \ and ending with a letter or digit. Anything else is 404 `LINK_NAO_ENCONTRADO`."
+        required: true
+        schema:
+          type: string
+          pattern: "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+      - name: token
+        in: path
+        description: "The case token returned when the verification started. Anything\
+          \ that doesn't match `^[A-Za-z0-9_-]{22,64}$` is 404 `CASO_NAO_ENCONTRADO`."
+        required: true
+        schema:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{22,64}$"
+      responses:
+        "200":
+          description: The case.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaseResponse"
+        "400":
+          description: "- `REQUISICAO_INVALIDA`: a path that isn't normalised."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                REQUISICAO_INVALIDA:
+                  value:
+                    code: REQUISICAO_INVALIDA
+                    message: Malformed request.
+        "403":
+          description: "- `BFF_KEY_AUSENTE`: `X-Kybr-BFF-Key` is missing or wrong\
+            \ (the same body either way)."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                BFF_KEY_AUSENTE:
+                  value:
+                    code: BFF_KEY_AUSENTE
+                    message: Forbidden.
+        "404":
+          description: |-
+            - `LINK_NAO_ENCONTRADO`: the slug is unknown or malformed, or the link isn't set up yet. Decided from the slug alone, before the token is read; a disabled link still serves its existing cases.
+            - `CASO_NAO_ENCONTRADO`: the token is unknown or belongs to another link (the same response either way).
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                LINK_NAO_ENCONTRADO:
+                  value:
+                    code: LINK_NAO_ENCONTRADO
+                    message: Link not found.
+                CASO_NAO_ENCONTRADO:
+                  value:
+                    code: CASO_NAO_ENCONTRADO
+                    message: Case not found.
+        "406":
+          description: "- `FORMATO_NAO_ACEITO`: `Accept` excludes `application/json`\
+            \ (the body is still the JSON envelope)."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                FORMATO_NAO_ACEITO:
+                  value:
+                    code: FORMATO_NAO_ACEITO
+                    message: Response format not acceptable.
+        "429":
+          description: "- `LIMITE_TENTATIVAS`: too many reads from this client. Checked\
+            \ before the token is read."
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying (digits only).
+              schema:
+                type: integer
+                format: int32
+                minimum: 1
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                LIMITE_TENTATIVAS:
+                  value:
+                    code: LIMITE_TENTATIVAS
+                    message: Too many attempts.
+        "500":
+          description: "- `ERRO_INTERNO`: an unexpected error. No detail is given."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                ERRO_INTERNO:
+                  value:
+                    code: ERRO_INTERNO
+                    message: Internal error.
+        "503":
+          description: "- `INDISPONIVEL`: the database is unavailable. Retry later."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                INDISPONIVEL:
+                  value:
+                    code: INDISPONIVEL
+                    message: Service unavailable.
+        default:
+          description: Error envelope
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
+    ContactRequest:
+      properties:
+        email:
+          type: string
+          description: "The seller's contact e-mail for this case: at most 254 characters,\
+            \ no control or format characters, one `@`, a dotted domain. Surrounding\
+            \ spaces are trimmed. Not confirmed."
+          example: joao@empresa.com.br
+          maxLength: 254
+      required:
+      - email
+    VerifyRequest:
+      properties:
+        cnpj:
+          type: string
+          description: "The company's CNPJ, canonical: 14 upper-case characters, no\
+            \ punctuation, valid check digits. Alphanumeric CNPJs are accepted."
+          example: 12ABC34501DE35
+          pattern: "^[0-9A-Z]{12}[0-9]{2}$"
+        responsavel:
+          type: string
+          description: "The person responsible for the company, as the seller typed\
+            \ it: at least two words, at most 120 characters after NFC normalisation,\
+            \ letters, space, `'`, `-` and `.` only. Stored NFC-normalised and trimmed."
+          example: Maria Exemplo
+          maxLength: 120
+        ref:
+          type: string
+          description: "The integrator's reference, optional: printable ASCII, at\
+            \ most 256 characters. Stored untouched and never echoed."
+          maxLength: 256
+        ext_id:
+          type: string
+          description: "The integrator's external id, optional: printable ASCII, at\
+            \ most 256 characters. It is not verified: anyone can edit the link's\
+            \ query string. Stored untouched, shown as unverified and never echoed.\
+            \ Match a case on the CNPJ plus your own record, never on `ext_id` alone."
+          maxLength: 256
+      required:
+      - cnpj
+      - responsavel
+    VerifyResponse:
+      properties:
+        token:
+          type: string
+          description: Opaque; the seller's only way to read the case. Keep it secret.
+          pattern: "^[A-Za-z0-9_-]{22,64}$"
+      required:
+      - token
+    ContatoVendedor:
+      description: How the seller reaches the workspace.
+      properties:
+        tipo:
+          type: string
+          enum:
+          - email
+          - url
+        valor:
+          type: string
+          description: "With `email`, a plain address (`[A-Za-z0-9._+-]` local part,\
+            \ a dotted domain, at most 254 characters) that can safely become a `mailto:`;\
+            \ with `url`, an absolute `https:` URL without userinfo."
+          maxLength: 254
+      required:
+      - tipo
+      - valor
+    LinkInfoResponse:
+      properties:
+        nome:
+          type: string
+          description: "The workspace's name, shown as text."
+          minLength: 1
+        contato_vendedor:
+          $ref: "#/components/schemas/ContatoVendedor"
+      required:
+      - contato_vendedor
+      - nome
+    Cnae:
+      description: "The company's main activity: the description only, never the code."
+      properties:
+        descricao:
+          type: string
+          description: The main activity's description.
+          example: Comercio varejista de artigos do vestuario
+          minLength: 1
+      required:
+      - descricao
+    LookupResponse:
+      properties:
+        razao_social:
+          type: string
+          description: "The company name, any CPF masked as `***.***.***-**`."
+          example: LOJA EXEMPLO COMERCIO LTDA
+          minLength: 1
+        municipio:
+          type: string
+          description: The town of the company's address.
+          example: Sao Paulo
+          minLength: 1
+        uf:
+          type: string
+          description: The state.
+          example: SP
+          pattern: "^[A-Z]{2}$"
+        cnae:
+          $ref: "#/components/schemas/Cnae"
+      required:
+      - cnae
+      - municipio
+      - razao_social
+      - uf
+    CaseResponse:
+      description: A case's state and its seller-facing result. `resultado` is present
+        unless `estado` is `processing`; on `processing` it appears only once a contact
+        e-mail was saved (with `responsavel` and `email_contato_mascarado`) or when
+        no company data was found.
+      properties:
+        estado:
+          type: string
+          description: "`processing` while the verification runs; then `pending` (something\
+            \ is needed from the seller or a review is under way), `approved` or `blocked`."
+          enum:
+          - processing
+          - pending
+          - approved
+          - blocked
+        criado_em:
+          type: string
+          format: date-time
+          description: "When the case was created, ISO 8601 with an offset."
+          example: 2026-11-07T14:03:11Z
+        resultado:
+          $ref: "#/components/schemas/ResultadoPublico"
+      required:
+      - criado_em
+      - estado
+    Confirmacao:
+      description: What was confirmed on an approved case. The rows and their order
+        vary.
+      properties:
+        codigo:
+          type: string
+          enum:
+          - SITUACAO_ATIVA
+          - IE_ATIVA
+          - RESPONSAVEL_CONFERE
+        uf:
+          type: string
+          description: The state of the active registration; present with `IE_ATIVA`.
+          pattern: "^[A-Z]{2}$"
+      required:
+      - codigo
+    Item:
+      description: What is needed or under review on a pending case.
+      properties:
+        codigo:
+          type: string
+          enum:
+          - DOCUMENTO_RESPONSAVEL
+          - DOCUMENTO_SOLICITADO
+          - IE_NAO_ENCONTRADA
+          - IE_SUSPENSA
+          - SITUACAO_IRREGULAR
+          - ATIVIDADE_FORA_DA_CATEGORIA
+          - EMPRESA_RECENTE
+          - MEI
+        documento_tipo:
+          type: string
+          description: Present on document items.
+          enum:
+          - CONTRATO_SOCIAL_OU_CCMEI
+          - PROCURACAO
+          - COMPROVANTE_ENDERECO
+          - CARTAO_CNPJ
+          - RESPONSAVEL
+        documentos_enviados:
+          type: integer
+          format: int32
+          description: Present on document items.
+          minimum: 0
+        situacao:
+          type: string
+          description: Present on `SITUACAO_IRREGULAR`.
+          enum:
+          - inapta
+          - suspensa
+          - baixada
+          - nula
+        dias:
+          type: integer
+          format: int32
+          description: "Present on `EMPRESA_RECENTE`: days since the company opened."
+          minimum: 1
+        url_regularizacao:
+          type: string
+          description: An absolute `https:` URL on gov.br or a gov.br subdomain.
+      required:
+      - codigo
+    Motivo:
+      description: Why a case was blocked. A decision made by a person shows as `GENERICO`.
+      properties:
+        codigo:
+          type: string
+          enum:
+          - SITUACAO_IRREGULAR
+          - RESPONSAVEL_NAO_SOCIO
+          - EMPRESA_RECENTE
+          - ATIVIDADE_FORA_DA_CATEGORIA
+          - IE_NAO_ENCONTRADA
+          - IE_SUSPENSA
+          - MEI
+          - GENERICO
+        situacao:
+          type: string
+          description: Present on `SITUACAO_IRREGULAR`.
+          enum:
+          - inapta
+          - suspensa
+          - baixada
+          - nula
+        url_regularizacao:
+          type: string
+          description: An absolute `https:` URL on gov.br or a gov.br subdomain.
+      required:
+      - codigo
+    ResultadoPublico:
+      description: "The seller-facing result: `confirmacoes` on `approved`, `itens`\
+        \ on `pending`, `motivo` on `blocked`. Never raw checks, partner names, policy\
+        \ names or verdict words."
+      properties:
+        razao_social:
+          type: string
+          description: "The company name, any CPF masked as `***.***.***-**`. Absent\
+            \ with `variante`."
+        responsavel:
+          type: string
+          description: "The responsible person as the seller typed it, NFC-normalised\
+            \ and trimmed."
+        consultado_em:
+          type: string
+          format: date-time
+          description: "When the company data was fetched, ISO 8601 with an offset.\
+            \ Present whenever there is company data; absent with `variante`, or on\
+            \ `processing` before a result."
+          example: 2026-11-07T14:03:11Z
+        variante:
+          type: string
+          description: '`DADOS_NAO_ENCONTRADOS` when no company data was found; the
+            case then goes to human review and keeps the variant after it is decided.'
+          enum:
+          - DADOS_NAO_ENCONTRADOS
+        prazo_revisao:
+          type: string
+          format: date-time
+          description: "When a pending case is due to be decided, ISO 8601 with an\
+            \ offset. Always present on `pending`."
+          example: 2026-11-09T14:03:11Z
+        email_contato_mascarado:
+          type: string
+          description: "The seller's contact e-mail, masked, once saved: the first\
+            \ character of the local part, then `•••` (a one-character local part\
+            \ becomes just `•••`)."
+          example: j•••@empresa.com.br
+        confirmacoes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Confirmacao"
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/Item"
+        motivo:
+          $ref: "#/components/schemas/Motivo"
+      required:
+      - responsavel
     ErrorResponse:
       type: object
       description: The error envelope. `message` is fixed per code; clients branch
@@ -74,6 +1265,24 @@ components:
       required:
       - code
       - message
+  parameters:
+    X-Kybr-BFF-Key:
+      name: X-Kybr-BFF-Key
+      in: header
+      description: The server-to-server key of the link's frontend. Required on every
+        call; it grants trust in `X-Kybr-Client-IP` and nothing else. Never logged.
+      required: true
+      schema:
+        type: string
+    X-Kybr-Client-IP:
+      name: X-Kybr-Client-IP
+      in: header
+      description: "The end user's IP address (IPv4 or IPv6, no port), trusted only\
+        \ with a valid `X-Kybr-BFF-Key`. Omit it when it can't be derived; never send\
+        \ an empty or guessed value. Without it, limits are counted per link."
+      required: false
+      schema:
+        type: string
   headers:
     X-Request-Id:
       description: "A fresh UUID v4 for this request, for support and log correlation."

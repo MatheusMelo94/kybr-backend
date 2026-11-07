@@ -70,6 +70,9 @@ jobs:
           java-version: "25"
           cache: maven
 
+      - name: Public text (no references to private documents)
+        run: scripts/ci/check-public-text.sh
+
       - name: Docker available for Testcontainers
         run: docker version --format 'Docker server {{.Server.Version}}'
 
@@ -142,3 +145,31 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down -v
+
+  alerting:
+    name: Alert rules (promtool unit tests, Alertmanager config)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PROMETHEUS_VERSION: "3.15.1"
+      PROMETHEUS_SHA256: "6a726885328ad9efebbf36e876ce2fb6225468a71fd1e7ce3ba666d5f4d97a84"
+      ALERTMANAGER_VERSION: "0.34.1"
+      ALERTMANAGER_SHA256: "265b9d1e55ef0d5306a436018af6d2b686c2ce051f03d968f7464ecb1372a7e8"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install promtool and amtool (pinned, checksum-verified)
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o prom.tgz "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+          echo "${PROMETHEUS_SHA256}  prom.tgz" | sha256sum -c -
+          curl -sSfL -o am.tgz "https://github.com/prometheus/alertmanager/releases/download/v${ALERTMANAGER_VERSION}/alertmanager-${ALERTMANAGER_VERSION}.linux-amd64.tar.gz"
+          echo "${ALERTMANAGER_SHA256}  am.tgz" | sha256sum -c -
+          tar -xzf prom.tgz --strip-components=1 "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+          tar -xzf am.tgz --strip-components=1 "alertmanager-${ALERTMANAGER_VERSION}.linux-amd64/amtool"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Check alert rules and routing
+        run: scripts/ci/check-alerting.sh

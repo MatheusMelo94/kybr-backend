@@ -1,0 +1,5 @@
+{
+  "sentinel": "qa-stub-body-sentinel",
+  "scenario": "CNPJ not supported by the provider",
+  "outcome": "unsupported"
+}

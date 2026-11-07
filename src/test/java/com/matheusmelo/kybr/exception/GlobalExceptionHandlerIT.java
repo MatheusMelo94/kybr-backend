@@ -58,8 +58,14 @@ class GlobalExceptionHandlerIT extends WebIntegrationTest {
     }
 
     @Test
-    void aWrongScalarTypeIs422WithTheField() {
-        assertEnvelope(postJson("{\"display_name\":\"x\",\"cnpj\":12345678000195}"), 422, "VALOR_INVALIDO", "cnpj");
+    void aWrongScalarTypeIs422WithTheFieldAndItsConstraintsOwnCode() {
+        assertEnvelope(postJson("{\"display_name\":\"x\",\"cnpj\":12345678000195}"), 422, "CNPJ_INVALIDO", "cnpj");
+    }
+
+    @Test
+    void aWrongScalarTypeOnAFieldWithoutACodedConstraintIsValorInvalido() {
+        assertEnvelope(postJson("{\"display_name\":\"x\",\"item_count\":\"three\"}"), 422, "VALOR_INVALIDO",
+                "item_count");
     }
 
     @Test

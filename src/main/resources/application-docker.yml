@@ -1,7 +1,11 @@
 # Full docker-compose run on a developer machine. No secret has a default: compose passes
-# KYBR_BFF_KEY_CURRENT, KYBR_HASH_SECRET and KYBR_IDEMPOTENCY_ENC_KEY from .env (env_file),
-# which run-local.sh --docker fills with dev values on first run.
+# KYBR_BFF_KEY_CURRENT, KYBR_HASH_SECRET, KYBR_IDEMPOTENCY_ENC_KEY, KYBR_PII_ENC_KEY and
+# KYBR_ADMIN_TOKEN from .env (env_file), which run-local.sh --docker fills with dev values on first run.
 
 spring:
   mongodb:
     uri: ${MONGODB_URI:mongodb://mongo:27017/kybr?replicaSet=rs0}
+
+kybr:
+  admin:
+    allow-explicit-slug: true

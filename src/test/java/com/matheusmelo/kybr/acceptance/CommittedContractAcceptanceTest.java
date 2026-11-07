@@ -31,7 +31,7 @@ class CommittedContractAcceptanceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void theCommittedSpecIsContract010WithTheEnvelopeAndNoPaths() throws IOException {
+    void theCommittedSpecCarriesTheEnvelopeAndOnlySellerLinkPaths() throws IOException {
         Map<String, Object> spec = spec();
         Map<String, Object> info = (Map<String, Object>) spec.get("info");
         Map<String, Object> components = (Map<String, Object>) spec.get("components");
@@ -40,8 +40,10 @@ class CommittedContractAcceptanceTest {
         Map<String, Object> properties = (Map<String, Object>) envelope.get("properties");
         Map<String, Object> code = (Map<String, Object>) properties.get("code");
 
-        assertThat(info).containsEntry("version", "0.1.0");
-        assertThat((Map<String, Object>) spec.get("paths")).as("0.1.0 publishes no paths").isEmpty();
+        assertThat((String) info.get("version")).isEqualTo("0.2.0");
+        assertThat(((Map<String, Object>) spec.get("paths")).keySet()).as("only the seller-link paths are published")
+                .containsExactlyInAnyOrder("/public/v/{slug}", "/public/v/{slug}/lookup", "/public/v/{slug}/verify",
+                        "/public/v/{slug}/cases/{token}", "/public/v/{slug}/cases/{token}/contact");
         assertThat((List<Map<String, Object>>) spec.get("servers")).extracting(s -> s.get("url"))
                 .containsExactly("https://api.kybr.com.br", "https://api-staging.kybr.com.br");
         assertThat(properties.keySet()).containsExactlyInAnyOrder("code", "message", "field");
