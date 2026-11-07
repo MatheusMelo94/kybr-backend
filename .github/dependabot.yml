@@ -31,6 +31,11 @@ updates:
       interval: weekly
       day: monday
       timezone: America/Sao_Paulo
+    # MongoDB major versions move deliberately, together with the test container image and the
+    # production cluster, never by an automatic bump. Minor and patch updates still come through.
+    ignore:
+      - dependency-name: "mongo"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "chore(docker)"
 
