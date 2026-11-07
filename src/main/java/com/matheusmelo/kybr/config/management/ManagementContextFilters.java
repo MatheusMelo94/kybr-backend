@@ -3,6 +3,7 @@ package com.matheusmelo.kybr.config.management;
 import com.matheusmelo.kybr.config.KybrProperties;
 import com.matheusmelo.kybr.config.filter.FilterOrder;
 import com.matheusmelo.kybr.exception.ErrorResponseWriter;
+import com.matheusmelo.kybr.util.LogRedactor;
 import jakarta.servlet.DispatcherType;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -28,9 +29,9 @@ public class ManagementContextFilters {
     }
 
     @Bean
-    FilterRegistrationBean<ManagementAccessLogFilter> managementAccessLogFilter() {
-        FilterRegistrationBean<ManagementAccessLogFilter> registration =
-                new FilterRegistrationBean<>(new ManagementAccessLogFilter(ManagementSecurityConfig.openProbes()));
+    FilterRegistrationBean<ManagementAccessLogFilter> managementAccessLogFilter(LogRedactor redactor) {
+        FilterRegistrationBean<ManagementAccessLogFilter> registration = new FilterRegistrationBean<>(
+                new ManagementAccessLogFilter(ManagementSecurityConfig.openProbes(), redactor));
         registration.setOrder(FilterOrder.ACCESS_LOG);
         return registration;
     }

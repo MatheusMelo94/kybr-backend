@@ -148,7 +148,7 @@ public class AccessLogFilter extends OncePerRequestFilter implements Ordered {
     }
 
     static String redactedPath(LogRedactor redactor, String rawPath) {
-        return rawPath == null ? NONE : redactor.redact(rawPath);
+        return rawPath == null ? NONE : redactor.redactPath(rawPath);
     }
 
     /** {@code ["name", ...]}: query parameter names only (never values), redacted, in order. */

@@ -121,7 +121,7 @@ class ManagementPortSecurityIT extends WebIntegrationTest {
             List<ILoggingEvent> lines = log.events();
             assertThat(lines).hasSize(1);
             String line = lines.getFirst().getFormattedMessage();
-            assertThat(line).contains("event=admin_access", "method=POST", "operation=" + ADMIN + "/x",
+            assertThat(line).contains("event=admin_access", "method=POST", "operation=" + ADMIN + "/{operacao}",
                     "status=" + response.statusCode(), "token_slot=PREVIOUS", "duration_ms=",
                     "request_id=" + response.header(RequestIdFilter.HEADER));
             assertThat(line).doesNotContain(canary, TestSecrets.ADMIN_TOKEN_PREVIOUS, TestSecrets.ADMIN_TOKEN);

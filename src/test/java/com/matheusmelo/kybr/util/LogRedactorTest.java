@@ -257,4 +257,30 @@ class LogRedactorTest {
         ThreadMXBean threads = ManagementFactory.getThreadMXBean();
         return threads.isCurrentThreadCpuTimeSupported() ? threads.getCurrentThreadCpuTime() : System.nanoTime();
     }
+
+    @Test
+    void aPathForALogLineHasNoControlOrLineBreakingCharacters() {
+        String path = redactor.redactPath("/actuator/admin\r\nevent=forged\tx\u0085y\u2028z\u2029w\u200Ev");
+
+        assertThat(path).isEqualTo("/actuator/admin%0D%0Aevent=forged%09x%C2%85y%E2%80%A8z%E2%80%A9w%E2%80%8Ev");
+    }
+
+    @Test
+    void aPathForALogLineCannotForgeAFieldWithASpace() {
+        assertThat(redactor.redactPath("/actuator/admin status=200")).isEqualTo("/actuator/admin%20status=200");
+    }
+
+    @Test
+    void aPathForALogLineKeepsEncodedCharactersAsTextAndStillRedacts() {
+        assertThat(redactor.redactPath("/actuator/admin%0D%0Aevent=forged")).isEqualTo("/actuator/admin%0D%0Aevent=forged");
+        assertThat(redactor.redactPath("/public/v/s/cases/abc123")).doesNotContain("abc123").contains("tok:");
+    }
+
+    @Test
+    void aPathForALogLineIsCappedInLength() {
+        String path = redactor.redactPath("/" + "a".repeat(5_000));
+
+        assertThat(path).hasSize(LogRedactor.MAX_PATH_CHARS + 1).endsWith("\u2026");
+        assertThat(redactor.redactPath(null)).isNull();
+    }
 }
