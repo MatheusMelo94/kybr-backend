@@ -84,9 +84,13 @@ class ManagementAccessLogFilterTest {
         return request;
     }
 
-    /** A field that starts the line or follows whitespace; a forged one stays glued to its encoded break. */
+    /**
+     * A field that starts the line, follows whitespace, or opens the JSON "message" value (the
+     * structured format is active when an earlier test in the same JVM switched to it); a forged
+     * one stays glued to its encoded break.
+     */
     private static Pattern field(String name) {
-        return Pattern.compile("(?:^|\\s)" + name + "=");
+        return Pattern.compile("(?:^|[\\s\"])" + name + "=");
     }
 
     private static List<String> adminLines(CapturedOutput output) {
