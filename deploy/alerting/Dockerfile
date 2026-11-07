@@ -4,7 +4,7 @@
 # does it. Base images pinned by tag + digest; Dependabot (docker ecosystem) proposes updates.
 FROM prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a AS alertmanager
 
-FROM victoriametrics/vmalert:v1.154.1@sha256:aafb962b5a5713c71f0d697d629416f9cccf23aecb74f0ec5e829ddbf3f221f2
+FROM victoriametrics/vmalert:v1.155.0@sha256:3256cba5ddaca5974eae6141105cec4ce37871f1c213f0a5c267ec0111bc68e1
 
 # envsubst renders the templates at start; no other packages.
 RUN apk add --no-cache gettext-envsubst \
