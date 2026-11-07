@@ -84,8 +84,8 @@ class HealthProbesIT extends WebIntegrationTest {
 
         assertThat(prometheus.statusCode()).isEqualTo(200);
         assertThat(prometheus.contentType()).startsWith("text/plain");
-        assertThat(management("/actuator/env").statusCode()).isEqualTo(404);
-        assertThat(management("/actuator/heapdump").statusCode()).isEqualTo(404);
+        assertThat(management("/actuator/env").statusCode()).isEqualTo(403);
+        assertThat(management("/actuator/heapdump").statusCode()).isEqualTo(403);
     }
 
     @Test

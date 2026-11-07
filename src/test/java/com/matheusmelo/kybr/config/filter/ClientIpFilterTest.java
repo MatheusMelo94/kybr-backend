@@ -2,12 +2,14 @@ package com.matheusmelo.kybr.config.filter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.matheusmelo.kybr.config.KybrProperties.Route;
 import com.matheusmelo.kybr.model.BffKeySlot;
 import com.matheusmelo.kybr.model.ClientIp;
 import com.matheusmelo.kybr.model.ClientIp.Source;
 import com.matheusmelo.kybr.service.ClientIpResolver;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.slf4j.MDC;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.http.HttpMethod;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.util.ServletRequestPathUtils;
@@ -26,7 +29,14 @@ class ClientIpFilterTest {
     private static final String FLY = "Fly-Client-IP";
 
     private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    private static final String LINK = "/public/v/{slug}";
+    private static final String UPLOAD = "/public/v/{slug}/cases/{token}/documents";
+
+    private final SimpleMeterRegistry notExpectedMeters = new SimpleMeterRegistry();
     private final ClientIpFilter fly = new ClientIpFilter(new ClientIpResolver(FLY), meters);
+    private final ClientIpFilter withRoutes = new ClientIpFilter(new ClientIpResolver(FLY), notExpectedMeters,
+            List.of(new Route(HttpMethod.GET, LINK), new Route(HttpMethod.GET, "/livez"),
+                    new Route(HttpMethod.POST, UPLOAD), new Route(HttpMethod.OPTIONS, UPLOAD)));
 
     @AfterEach
     void clearMdc() {
@@ -49,6 +59,18 @@ class ClientIpFilterTest {
             assertThat(MDC.get(ClientIpFilter.MDC_SOURCE)).isEqualTo(seen.get().source().name());
         });
         return seen.get();
+    }
+
+    private ClientIp resolve(ClientIpFilter filter, MockHttpServletRequest request) throws Exception {
+        AtomicReference<ClientIp> seen = new AtomicReference<>();
+        filter.doFilter(request, new MockHttpServletResponse(),
+                (req, res) -> seen.set((ClientIp) ((HttpServletRequest) req).getAttribute(ClientIp.ATTRIBUTE)));
+        return seen.get();
+    }
+
+    private double absent(String esperado) {
+        var counter = notExpectedMeters.find("kybr.client_ip.absent").tags("esperado", esperado).counter();
+        return counter == null ? 0 : counter.count();
     }
 
     private double count(String meter, String... tags) {
@@ -81,6 +103,61 @@ class ClientIpFilterTest {
         assertThat(run(request)).isEqualTo(new ClientIp("198.51.100.7", Source.FORWARDED_ABSENT));
         assertThat(output).contains("WARN").contains("event=client_ip_absent");
         assertThat(count("kybr.client_ip.absent")).isEqualTo(1);
+    }
+
+    @Test
+    void aMissingClientIpWhereNoneIsExpectedIsOnlyDebug(CapturedOutput output) throws Exception {
+        MockHttpServletRequest request = request("/public/v/loja-exemplo", BffKeySlot.CURRENT);
+        request.addHeader(FLY, "198.51.100.7");
+
+        ClientIp resolved = resolve(withRoutes, request);
+
+        assertThat(resolved).isEqualTo(new ClientIp("198.51.100.7", Source.FORWARDED_ABSENT));
+        assertThat(output).doesNotContain("event=client_ip_absent");
+        assertThat(absent("false")).isEqualTo(1);
+        assertThat(absent("true")).isZero();
+    }
+
+    @Test
+    void aMissingClientIpOnLivezWithTheKeyIsNotExpected(CapturedOutput output) throws Exception {
+        MockHttpServletRequest request = request("/livez", BffKeySlot.CURRENT);
+        request.addHeader(FLY, "198.51.100.7");
+
+        resolve(withRoutes, request);
+
+        assertThat(output).doesNotContain("event=client_ip_absent");
+        assertThat(absent("false")).isEqualTo(1);
+    }
+
+    @Test
+    void aMissingClientIpElsewhereIsWarnedAsExpected(CapturedOutput output) throws Exception {
+        MockHttpServletRequest lookup = request("/public/v/loja-exemplo/lookup", BffKeySlot.CURRENT);
+        lookup.addHeader(FLY, "198.51.100.7");
+        MockHttpServletRequest otherMethod = request("/public/v/loja-exemplo", BffKeySlot.CURRENT);
+        otherMethod.setMethod("POST");
+        otherMethod.addHeader(FLY, "198.51.100.7");
+
+        assertThat(resolve(withRoutes, lookup).source()).isEqualTo(Source.FORWARDED_ABSENT);
+        resolve(withRoutes, otherMethod);
+
+        assertThat(output).contains("WARN").contains("event=client_ip_absent");
+        assertThat(absent("true")).isEqualTo(2);
+        assertThat(absent("false")).isZero();
+    }
+
+    @Test
+    void matchingUsesTheNormalisedPathNotTheRawUri(CapturedOutput output) throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/public/v/loja-exemplo/lookup");
+        request.setRemoteAddr("192.0.2.10");
+        request.setAttribute(BffKeySlot.ATTRIBUTE, BffKeySlot.CURRENT);
+        request.addHeader(FLY, "198.51.100.7");
+        MockHttpServletRequest normalised = new MockHttpServletRequest("GET", "/public/v/loja-exemplo");
+        request.setAttribute(PathFirewallFilter.REQUEST_PATH_ATTRIBUTE,
+                ServletRequestPathUtils.parseAndCache(normalised));
+
+        resolve(withRoutes, request);
+
+        assertThat(absent("false")).as("decided on the cached path").isEqualTo(1);
     }
 
     @Test

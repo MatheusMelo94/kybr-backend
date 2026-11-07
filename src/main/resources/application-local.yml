@@ -1,6 +1,7 @@
 # run-local.sh against the compose MongoDB. No secret has a default here either:
-# KYBR_BFF_KEY_CURRENT, KYBR_HASH_SECRET and KYBR_IDEMPOTENCY_ENC_KEY come from the environment, which
-# run-local.sh loads from .env (generating dev values there on first run). Only non-secret values below.
+# KYBR_BFF_KEY_CURRENT, KYBR_HASH_SECRET, KYBR_IDEMPOTENCY_ENC_KEY, KYBR_PII_ENC_KEY and KYBR_ADMIN_TOKEN
+# come from the environment, which run-local.sh loads from .env (generating dev values there on first
+# run). Only non-secret values below.
 
 spring:
   mongodb:
@@ -9,3 +10,7 @@ spring:
 springdoc:
   api-docs:
     enabled: true
+
+kybr:
+  admin:
+    allow-explicit-slug: true

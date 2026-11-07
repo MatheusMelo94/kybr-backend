@@ -1,5 +1,7 @@
 package com.matheusmelo.kybr.config.filter;
 
+import com.matheusmelo.kybr.config.KybrProperties;
+import com.matheusmelo.kybr.config.KybrProperties.Route;
 import com.matheusmelo.kybr.model.BffKeySlot;
 import com.matheusmelo.kybr.model.ClientIp;
 import com.matheusmelo.kybr.service.ClientIpResolver;
@@ -15,6 +17,7 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.web.servlet.FilterRegistration;
 import org.springframework.core.Ordered;
 import org.springframework.stereotype.Component;
@@ -26,8 +29,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * {@code client_ip}/{@code client_ip_source} (cleared by filter [1]), and emits:
  *
  * <ul>
- *   <li>WARN {@code event=client_ip_absent} + {@code kybr.client_ip.absent}: valid key, no usable
- *       {@code X-Kybr-Client-IP};
+ *   <li>WARN {@code event=client_ip_absent} + {@code kybr.client_ip.absent{esperado="true"}}: valid
+ *       key, no usable {@code X-Kybr-Client-IP}. On a route listed in
+ *       {@code kybr.client-ip.not-expected} (the BFF sends no client IP there by design) it is DEBUG
+ *       and {@code esperado="false"} instead, so only the alert-worthy case is counted as expected.
+ *       The resolved source is {@code FORWARDED_ABSENT} either way;
  *   <li>WARN {@code event=client_ip_platform_absent reason=…} +
  *       {@code kybr.client_ip.platform_absent{reason}}: the platform header is missing, invalid or
  *       repeated; {@code reason=missing} on {@code /livez} is DEBUG (Fly's own health checks);
@@ -50,10 +56,23 @@ public class ClientIpFilter extends OncePerRequestFilter implements Ordered {
 
     private final ClientIpResolver resolver;
     private final MeterRegistry meters;
+    private final List<RouteMatcher> notExpected;
 
+    @Autowired
+    public ClientIpFilter(ClientIpResolver resolver, MeterRegistry meters, KybrProperties properties) {
+        this(resolver, meters, properties.clientIp().notExpected());
+    }
+
+    /** No route is exempt from expecting a client IP. */
     public ClientIpFilter(ClientIpResolver resolver, MeterRegistry meters) {
+        this(resolver, meters, List.of());
+    }
+
+    public ClientIpFilter(ClientIpResolver resolver, MeterRegistry meters, List<Route> notExpected) {
         this.resolver = resolver;
         this.meters = meters;
+        this.notExpected = notExpected.stream().map(route -> RouteMatcher.of(route.method(), route.pattern()))
+                .toList();
     }
 
     @Override
@@ -94,8 +113,13 @@ public class ClientIpFilter extends OncePerRequestFilter implements Ordered {
         }
         switch (resolution.clientIp().source()) {
             case FORWARDED_ABSENT -> {
-                meters.counter("kybr.client_ip.absent").increment();
-                log.warn("event=client_ip_absent");
+                boolean expected = clientIpExpected(request);
+                meters.counter("kybr.client_ip.absent", "esperado", String.valueOf(expected)).increment();
+                if (expected) {
+                    log.warn("event=client_ip_absent");
+                } else {
+                    log.debug("event=client_ip_absent esperado=false");
+                }
             }
             case DIRECT -> {
                 if (resolution.clientHeaderPresent()) {
@@ -105,6 +129,12 @@ public class ClientIpFilter extends OncePerRequestFilter implements Ordered {
             default -> {
             }
         }
+    }
+
+    /** False on a not-expected route; true elsewhere, and when no parsed path was cached. */
+    private boolean clientIpExpected(HttpServletRequest request) {
+        return request.getAttribute(PathFirewallFilter.REQUEST_PATH_ATTRIBUTE) == null
+                || notExpected.stream().noneMatch(route -> route.matches(request));
     }
 
     private static boolean isLivez(HttpServletRequest request) {

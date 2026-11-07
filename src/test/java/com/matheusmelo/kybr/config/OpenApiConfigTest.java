@@ -31,7 +31,7 @@ class OpenApiConfigTest {
     void publishesTheContractVersionAndTheStaticServers() {
         OpenAPI openApi = customised();
 
-        assertThat(openApi.getInfo().getVersion()).isEqualTo("0.1.0");
+        assertThat(openApi.getInfo().getVersion()).isEqualTo("0.2.0");
         assertThat(openApi.getServers()).extracting(Server::getUrl)
                 .containsExactly("https://api.kybr.com.br", "https://api-staging.kybr.com.br");
     }
@@ -58,5 +58,21 @@ class OpenApiConfigTest {
         assertThat(responses.get("200").getHeaders()).doesNotContainKey("Retry-After");
         assertThat(responses.get("default").getContent().get("application/json").getSchema().get$ref())
                 .isEqualTo("#/components/schemas/ErrorResponse");
+    }
+
+    @Test
+    void anErrorResponseGetsTheEnvelopeAndOneExamplePerNamedCodeIgnoringOtherBacktickedText() {
+        Operation operation = new Operation().responses(new ApiResponses()
+                .addApiResponse("404", new ApiResponse()
+                        .description("- `LINK_NAO_ENCONTRADO`: no link at `/public/v/{slug}`.\n- `NOT_A_CODE`: x.")));
+        OpenAPI openApi = config.kybrOpenApi().paths(new Paths().addPathItem("/v1/x", new PathItem().get(operation)));
+        config.kybrConventions().customise(openApi);
+
+        io.swagger.v3.oas.models.media.MediaType json = openApi.getPaths().get("/v1/x").getGet().getResponses()
+                .get("404").getContent().get("application/json");
+        assertThat(json.getSchema().get$ref()).isEqualTo("#/components/schemas/ErrorResponse");
+        assertThat(json.getExamples()).containsOnlyKeys("LINK_NAO_ENCONTRADO");
+        assertThat(json.getExamples().get("LINK_NAO_ENCONTRADO").getValue())
+                .isEqualTo(java.util.Map.of("code", "LINK_NAO_ENCONTRADO", "message", "Link not found."));
     }
 }

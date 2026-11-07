@@ -1,5 +1,6 @@
-# Cloud profile (Fly, behind the BFF). No secret has a default: MONGODB_URI,
-# KYBR_BFF_KEY_CURRENT, KYBR_HASH_SECRET and KYBR_IDEMPOTENCY_ENC_KEY must come from Fly secrets.
+# Cloud profile (Fly, behind the BFF). No secret has a default: MONGODB_URI, KYBR_BFF_KEY_CURRENT,
+# KYBR_HASH_SECRET, KYBR_IDEMPOTENCY_ENC_KEY, KYBR_PII_ENC_KEY and KYBR_ADMIN_TOKEN must come from
+# Fly secrets. The provider runs as the stub here unless KYBR_CNPJA_MODE says otherwise.
 
 logging:
   structured:
@@ -12,3 +13,5 @@ logging:
 kybr:
   client-ip:
     platform-header: ${KYBR_CLIENT_IP_PLATFORM_HEADER:Fly-Client-IP}
+  admin:
+    allow-explicit-slug: true # lets staging mirror the frontend's fixture slugs

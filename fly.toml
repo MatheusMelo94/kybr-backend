@@ -1,7 +1,11 @@
 # Fly.io config: STAGING API (kybr-api-staging), region gru (São Paulo).
 #   Deploy: .github/workflows/deploy-staging.yml (or: fly deploy --config fly.toml --remote-only)
-#   Secrets (Fly secrets, never in this file): MONGODB_URI, KYBR_BFF_KEY_CURRENT, KYBR_BFF_KEY_PREVIOUS,
-#     KYBR_HASH_SECRET, KYBR_HASH_SECRET_PREVIOUS, KYBR_IDEMPOTENCY_ENC_KEY
+#   Secrets (Fly secrets, never in this file). Required: MONGODB_URI, KYBR_BFF_KEY_CURRENT,
+#     KYBR_HASH_SECRET, KYBR_IDEMPOTENCY_ENC_KEY, KYBR_PII_ENC_KEY, KYBR_ADMIN_TOKEN.
+#     Rotation only: KYBR_BFF_KEY_PREVIOUS, KYBR_HASH_SECRET_PREVIOUS, KYBR_ADMIN_TOKEN_PREVIOUS.
+#     Optional: KYBR_CNPJA_MONTHLY_CREDITS / KYBR_CNPJA_RATE_PER_MINUTE (default 10000 / 10; lowered
+#     temporarily to exercise the budget alerts), KYBR_CNPJA_API_KEY (opt-in live checks only).
+#     deploy-staging.yml refuses to deploy while a required name is missing.
 #   Cost posture: auto-stop to zero when idle; no static egress IP. Network access settings are
 #     documented privately.
 app = "kybr-api-staging"
@@ -20,6 +24,8 @@ kill_timeout = "30s"
   PORT = "8080"
   MANAGEMENT_PORT = "8081"
   KYBR_CLIENT_IP_PLATFORM_HEADER = "Fly-Client-IP"
+  # Company-data provider: synthetic fixtures on staging; never live without an explicit decision.
+  KYBR_CNPJA_MODE = "stub"
 
 # Public edge: 443 only (TLS terminated by Fly, TLS >= 1.2). No port 80, no force_https, no redirect.
 # Deliberately [[services]] rather than [http_service], which would add port 80.

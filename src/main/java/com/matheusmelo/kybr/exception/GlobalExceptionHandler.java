@@ -101,7 +101,8 @@ public class GlobalExceptionHandler {
     void bindException(BindException ex, HttpServletResponse response) throws IOException {
         ParameterLocation location = ex instanceof MethodArgumentNotValidException
                 ? ParameterLocation.BODY : ParameterLocation.QUERY;
-        Optional<FieldError> first = ex.getFieldErrors().stream().min(FIELD_ORDER);
+        Class<?> target = ex.getTarget() == null ? null : ex.getTarget().getClass();
+        Optional<FieldError> first = ex.getFieldErrors().stream().min(fieldOrder(target));
         if (first.isEmpty()) {
             writeCode(response, ErrorCode.VALOR_INVALIDO, null, location);
             return;
@@ -145,7 +146,12 @@ public class GlobalExceptionHandler {
         if (ex.getCause() instanceof DatabindException databind
                 && !databind.getPath().isEmpty()) {
             // Unknown property, wrong scalar type, null for a primitive: the field is on the wire.
-            writeCode(response, ErrorCode.VALOR_INVALIDO, jsonPath(databind.getPath()), ParameterLocation.BODY);
+            // A wrongly typed field whose constraints raise their own code reports that code.
+            JacksonException.Reference last = databind.getPath().getLast();
+            Object from = last.from();
+            Class<?> owner = from instanceof Class<?> type ? type : from == null ? null : from.getClass();
+            ErrorCode code = DeclaredFields.code(owner, last.getPropertyName()).orElse(ErrorCode.VALOR_INVALIDO);
+            writeCode(response, code, jsonPath(databind.getPath()), ParameterLocation.BODY);
             return;
         }
         // Malformed JSON, duplicate keys, trailing tokens, a missing or unreadable body.
@@ -211,8 +217,15 @@ public class GlobalExceptionHandler {
     private record Violation(ErrorCode code, String field, ParameterLocation location) {
     }
 
-    private static final Comparator<FieldError> FIELD_ORDER =
-            Comparator.comparing(FieldError::getField).thenComparing(e -> String.valueOf(e.getCode()));
+    /**
+     * The first invalid field in the body type's declared order (then by path and constraint, so
+     * the choice is deterministic).
+     */
+    private static Comparator<FieldError> fieldOrder(Class<?> target) {
+        return Comparator.<FieldError>comparingInt(e -> DeclaredFields.index(target, e.getField()))
+                .thenComparing(FieldError::getField)
+                .thenComparing(e -> String.valueOf(e.getCode()));
+    }
 
     private static List<Violation> violations(ParameterValidationResult result) {
         MethodParameter parameter = result.getMethodParameter();

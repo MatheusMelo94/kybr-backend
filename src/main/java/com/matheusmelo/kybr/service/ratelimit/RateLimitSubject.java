@@ -2,6 +2,7 @@ package com.matheusmelo.kybr.service.ratelimit;
 
 import com.matheusmelo.kybr.model.ClientIp;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Who a rate limit counts. Sealed, so every policy check is exhaustive.
@@ -23,6 +24,20 @@ public sealed interface RateLimitSubject {
         IpUnknown unknown = new IpUnknown(scope);
         return clientIp.isPerClientIdentity() ? new Ip(clientIp.ip()) : unknown;
     }
+
+    /**
+     * Like {@link #forClient}, but a per-client IP is counted separately in each {@code scope} (e.g.
+     * "per IP, per link"): an {@link Ip} of the address within the scope. A shared address is still
+     * {@link IpUnknown} for the scope, never a per-IP subject.
+     */
+    static RateLimitSubject forClientInScope(ClientIp clientIp, String scope) {
+        Objects.requireNonNull(clientIp, "clientIp");
+        IpUnknown unknown = new IpUnknown(scope);
+        return clientIp.isPerClientIdentity() ? new Ip(clientIp.ip() + SCOPE_SEPARATOR + scope) : unknown;
+    }
+
+    /** Joins a value and its scope; never part of an IP address, a slug or a CNPJ. */
+    String SCOPE_SEPARATOR = "|";
 
     SubjectKind kind();
 
@@ -115,6 +130,50 @@ public sealed interface RateLimitSubject {
         @Override
         public String toString() {
             return "Cnpj[redacted]";
+        }
+    }
+
+    /**
+     * A CNPJ counted per link. The CNPJ is put in canonical form here, so a formatted and a bare
+     * CNPJ share one counter; an invalid CNPJ is refused.
+     */
+    record SlugCnpj(String slug, String cnpj) implements RateLimitSubject {
+        public SlugCnpj {
+            requireText(slug, "slug");
+            cnpj = com.matheusmelo.kybr.util.Cnpj.canonicalize(cnpj)
+                    .orElseThrow(() -> new IllegalArgumentException("cnpj must be a valid CNPJ"));
+        }
+
+        @Override
+        public SubjectKind kind() {
+            return SubjectKind.CNPJ;
+        }
+
+        @Override
+        public String value() {
+            return slug + SCOPE_SEPARATOR + cnpj;
+        }
+
+        @Override
+        public String toString() {
+            return "SlugCnpj[slug=" + slug + ", cnpj=redacted]";
+        }
+    }
+
+    /** A case, by id. */
+    record CaseId(UUID caseId) implements RateLimitSubject {
+        public CaseId {
+            Objects.requireNonNull(caseId, "caseId");
+        }
+
+        @Override
+        public SubjectKind kind() {
+            return SubjectKind.CASE;
+        }
+
+        @Override
+        public String value() {
+            return caseId.toString();
         }
     }
 

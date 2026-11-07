@@ -1,0 +1,5 @@
+{
+  "sentinel": "qa-stub-body-sentinel",
+  "scenario": "provider slower than every read timeout",
+  "outcome": "timeout"
+}

@@ -1,0 +1,251 @@
+# promtool unit tests: each alert fires on synthetic series (rendered with tests/test-thresholds.vars),
+# and a near-miss series does not. Run by scripts/ci/check-alerting.sh.
+rule_files:
+  - kybr-api.rules.yml
+evaluation_interval: 1m
+
+tests:
+  # ------------------------------------------------------------ volume, abuse, admin
+  - interval: 1m
+    input_series:
+      - series: 'kybr_link_lookup_total{app="kybr-api",slug="loja-a",resultado="fresh"}'
+        values: '0+10x30'
+      - series: 'kybr_link_lookup_total{app="kybr-api",slug="loja-quiet",resultado="fresh"}'
+        values: '0+1x30'
+      - series: 'kybr_link_verify_total{app="kybr-api",slug="loja-a",resultado="accepted"}'
+        values: '0+5x30'
+      - series: 'kybr_ratelimit_exceeded_total{app="kybr-api-staging",policy="link.lookup.ip"}'
+        values: '0+10x30'
+      - series: 'kybr_client_ip_absent_total{app="kybr-api",esperado="true"}'
+        values: '0+1x30'
+      - series: 'kybr_client_ip_absent_total{app="kybr-api-staging",esperado="false"}'
+        values: '0+100x30'
+      - series: 'kybr_ratelimit_ip_unknown_total{app="kybr-api",policy="link.lookup.ip-unknown"}'
+        values: '0+10x30'
+      - series: 'kybr_client_ip_platform_absent_total{app="kybr-api",reason="invalid"}'
+        values: '0+1x30'
+      - series: 'kybr_client_ip_platform_absent_total{app="kybr-api",reason="missing"}'
+        values: '0+50x30'
+      - series: 'kybr_bff_key_rejected_total{app="kybr-api"}'
+        values: '0+50x30'
+      - series: 'kybr_admin_auth_failed_total{app="kybr-api-staging"}'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: KybrLookupVolumePerSlugHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: lookup-volume, app: kybr-api, slug: loja-a }
+            exp_annotations: { summary: "Company lookups on loja-a (kybr-api) above baseline: 150 in 15 min" }
+      - eval_time: 20m
+        alertname: KybrVerifyVolumePerSlugHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: verify-volume, app: kybr-api, slug: loja-a }
+            exp_annotations: { summary: "Verifications on loja-a (kybr-api) above baseline: 75 in 15 min" }
+      - eval_time: 20m
+        alertname: KybrRateLimit429Spike
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: rate-limit-429, app: kybr-api-staging, policy: link.lookup.ip }
+            exp_annotations: { summary: "429 spike on policy link.lookup.ip (kybr-api-staging): 50 in 5 min" }
+      - eval_time: 20m
+        alertname: KybrClientIpAbsentWhereExpected
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: client-ip-absent, app: kybr-api }
+            exp_annotations: { summary: "BFF calls without X-Kybr-Client-IP on routes that expect it (kybr-api): 5 in 5 min" }
+      - eval_time: 20m
+        alertname: KybrRateLimitIpUnknownHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: ip-unknown, app: kybr-api, policy: link.lookup.ip-unknown }
+            exp_annotations: { summary: "Shared-IP (ip-unknown) rate-limit subjects on link.lookup.ip-unknown (kybr-api): 150 in 15 min" }
+      - eval_time: 20m
+        alertname: KybrPlatformHeaderInvalid
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: platform-header, app: kybr-api, reason: invalid }
+            exp_annotations: { summary: "Fly-Client-IP invalid or duplicated (invalid, kybr-api)" }
+      - eval_time: 20m
+        alertname: KybrBffKeyRejectedSpike
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: bff-key-rejected, app: kybr-api }
+            exp_annotations: { summary: "BFF key rejections (kybr-api): 250 in 5 min" }
+      - eval_time: 20m
+        alertname: KybrAdminAuthFailed
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: admin-auth-failed, app: kybr-api-staging }
+            exp_annotations: { summary: "Failed admin authentication on the management port (kybr-api-staging)" }
+
+  # ------------------------------------------------------------ provider, budgets, brakes
+  - interval: 1m
+    input_series:
+      - series: 'kybr_provider_credits_used_ratio{app="kybr-api",instance="m1"}'
+        values: '0.85x30'
+      - series: 'kybr_provider_credits_used_ratio{app="kybr-api-staging",instance="m1"}'
+        values: '1x30'
+      - series: 'kybr_provider_budget_warning_total{app="kybr-api",budget="d2_daily"}'
+        values: '0x15 1x15'
+      - series: 'kybr_provider_budget_exhausted_total{app="kybr-api",budget="monthly"}'
+        values: '0x15 1x15'
+      - series: 'kybr_verification_no_data_cap_total{app="kybr-api-staging",slug="loja-b"}'
+        values: '0x15 1x15'
+      - series: 'kybr_provider_spend_off{app="kybr-api-staging",instance="m1"}'
+        values: '1x30'
+      - series: 'kybr_provider_spend_off{app="kybr-api",instance="m1"}'
+        values: '0x30'
+      - series: 'kybr_link_lookup_total{app="kybr-api-staging",slug="loja-c",resultado="disabled"}'
+        values: '0+1x30'
+      - series: 'kybr_link_autofill_off{app="kybr-api-staging",instance="m1"}'
+        values: '1x30'
+      - series: 'kybr_link_autofill_off{app="kybr-api",instance="m1"}'
+        values: '0x30'
+      - series: 'kybr_provider_calls_total{app="kybr-api",tipo="basic",resultado="error"}'
+        values: '0+1x30'
+      - series: 'kybr_provider_calls_total{app="kybr-api",tipo="basic",resultado="rate_limited"}'
+        values: '0+1x30'
+      # Successes, answers and budget denials never count as failures.
+      - series: 'kybr_provider_calls_total{app="kybr-api",tipo="full_check",resultado="found"}'
+        values: '0+50x30'
+      - series: 'kybr_provider_calls_total{app="kybr-api",tipo="full_check",resultado="not_found"}'
+        values: '0+50x30'
+      - series: 'kybr_provider_calls_total{app="kybr-api",tipo="full_check",resultado="unsupported"}'
+        values: '0+50x30'
+      - series: 'kybr_provider_calls_total{app="kybr-api",tipo="full_check",resultado="budget_denied"}'
+        values: '0+50x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: KybrCreditsUsed80
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: credits, app: kybr-api }
+            exp_annotations: { summary: "Provider credits at 85% of the month (kybr-api)" }
+          - exp_labels: { severity: warning, signal: credits, app: kybr-api-staging }
+            exp_annotations: { summary: "Provider credits at 100% of the month (kybr-api-staging)" }
+      - eval_time: 20m
+        alertname: KybrCreditsExhausted
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: credits, app: kybr-api-staging }
+            exp_annotations: { summary: "Provider credits exhausted (kybr-api-staging): lookups cache-only, verifications to manual review" }
+      - eval_time: 20m
+        alertname: KybrBudgetWarning
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: budget, app: kybr-api, budget: d2_daily }
+            exp_annotations: { summary: "Budget d2_daily reached 80% (kybr-api)" }
+      - eval_time: 20m
+        alertname: KybrBudgetExhausted
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: budget, app: kybr-api, budget: monthly }
+            exp_annotations: { summary: "Budget monthly exhausted (kybr-api): degrading to cache-only / manual review" }
+      - eval_time: 20m
+        alertname: KybrNoDataCapHit
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: no-data-cap, app: kybr-api-staging, slug: loja-b }
+            exp_annotations: { summary: "No-data cap reached on loja-b (kybr-api-staging): new verifications deferred" }
+      - eval_time: 20m
+        alertname: KybrProviderSpendOff
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: spend-off, app: kybr-api-staging }
+            exp_annotations: { summary: "Provider spend brake is ON (kybr-api-staging): all verifications deferred, lookups cache-only" }
+      - eval_time: 20m
+        alertname: KybrAutofillGlobalOff
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: autofill-off, app: kybr-api-staging }
+            exp_annotations: { summary: "Global autofill kill switch is ON (kybr-api-staging): every company lookup answers disabled" }
+      - eval_time: 20m
+        alertname: KybrAutofillDisabledResponses
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: autofill-slug-off, app: kybr-api-staging, slug: loja-c }
+            exp_annotations: { summary: "Autofill is answering disabled on loja-c (kybr-api-staging): a kill switch is off" }
+      - eval_time: 20m
+        alertname: KybrProviderCallErrors
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: provider-errors, app: kybr-api, tipo: basic }
+            exp_annotations: { summary: "Provider calls failing (basic, kybr-api): 20 in 10 min" }
+      # The budget counters stopped rising after minute 16: the alerts clear once the window passes.
+      - eval_time: 30m
+        alertname: KybrBudgetWarning
+        exp_alerts: []
+
+  # ------------------------------------------------------------ verification pipeline
+  - interval: 1m
+    input_series:
+      - series: 'kybr_verification_failed_total{app="kybr-api",motivo="PROVEDOR_INDISPONIVEL"}'
+        values: '0x15 1x15'
+      # Staging: half the verifications finish within 5 s (p90 > 5 s). Prod: 95% do (p90 <= 5 s).
+      - series: 'kybr_verification_duration_seconds_bucket{app="kybr-api-staging",instance="m1",resultado="approved",le="5.0"}'
+        values: '0+1x30'
+      - series: 'kybr_verification_duration_seconds_count{app="kybr-api-staging",instance="m1",resultado="approved"}'
+        values: '0+2x30'
+      - series: 'kybr_verification_duration_seconds_bucket{app="kybr-api",instance="m1",resultado="approved",le="5.0"}'
+        values: '0+19x30'
+      - series: 'kybr_verification_duration_seconds_count{app="kybr-api",instance="m1",resultado="approved"}'
+        values: '0+20x30'
+      - series: 'kybr_idempotency_completion_missing_total{app="kybr-api"}'
+        values: '0x15 1x15'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: KybrVerificationFailed
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: verification-failed, app: kybr-api, motivo: PROVEDOR_INDISPONIVEL }
+            exp_annotations: { summary: "Verifications failed to manual review (PROVEDOR_INDISPONIVEL, kybr-api)" }
+      - eval_time: 20m
+        alertname: KybrVerificationSlow
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: verification-slow, app: kybr-api-staging }
+            exp_annotations: { summary: "Verification p90 above 5 s on kybr-api-staging: only 50% finished within 5 s (10 min)" }
+      - eval_time: 20m
+        alertname: KybrIdempotencyCompletionMissing
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: completion-missing, app: kybr-api }
+            exp_annotations: { summary: "An idempotent endpoint returned without declaring completion (kybr-api)" }
+
+  # ------------------------------------------------------------ platform health, log events, watchdog
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{app="kybr-api",status="200",uri="/public/v/{slug}"}'
+        values: '0+90x30'
+      - series: 'http_server_requests_seconds_count{app="kybr-api",status="503",uri="/public/v/{slug}/empresa"}'
+        values: '0+10x30'
+      - series: 'http_server_requests_seconds_count{app="kybr-api-staging",status="200",uri="/livez"}'
+        values: '0+100x30'
+      - series: 'http_server_requests_seconds_count{app="kybr-api-staging",status="500",uri="/livez"}'
+        values: '0+1x30'
+      - series: 'kybr_log_events_total{source_app="kybr-api",event="redirect_blocked"}'
+        values: '0x17 1x13'
+      - series: 'kybr_log_events_total{source_app="kybr-api",event="access"}'
+        values: '0+100x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: Kybr5xxRateHigh
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: http-5xx, app: kybr-api }
+            exp_annotations: { summary: "5xx ratio 10% over 5 min (kybr-api)" }
+      - eval_time: 20m
+        alertname: KybrProdMetricsMissing
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: metrics-missing, app: kybr-api }
+            exp_annotations: { summary: "No metrics from kybr-api for 10 min (app down or scrape broken)" }
+      - eval_time: 20m
+        alertname: KybrSecurityLogEvent
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: log-event, source_app: kybr-api, event: redirect_blocked }
+            exp_annotations: { summary: "Log event redirect_blocked on kybr-api: 1 in 5 min" }
+      - eval_time: 2m
+        alertname: Watchdog
+        exp_alerts:
+          - exp_labels: { severity: none, signal: watchdog }
+            exp_annotations: { summary: "Always firing: proves the alerting pipeline is alive (routed to the dead-man check only)" }
+
+  # ------------------------------------------------------------ 24 h and 1 h windows
+  - interval: 1m
+    input_series:
+      - series: 'kybr_link_lookup_cache_reads_total{app="kybr-api",slug="loja-a"}'
+        values: '0+1x1500'
+      - series: 'kybr_link_contact_total{app="kybr-api",resultado="limited"}'
+        values: '0+1x1500'
+    alert_rule_test:
+      - eval_time: 1500m
+        alertname: KybrCacheReadsPerSlugHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: cache-reads, app: kybr-api, slug: loja-a }
+            exp_annotations: { summary: "Cache reads on loja-a (kybr-api) above threshold in 24 h: 1440" }
+      - eval_time: 1500m
+        alertname: KybrContactChangesLimited
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: contact-limited, app: kybr-api }
+            exp_annotations: { summary: "Contact e-mail changes hitting the per-case limit (kybr-api): 60 in 1 h" }

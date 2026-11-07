@@ -1,0 +1,51 @@
+# Alertmanager routing: e-mail to the operator. Rendered at container start from Fly secrets
+# (deploy/alerting/thresholds.env.example lists the names). The SMTP password is read from a file
+# written at startup, never from this template.
+global:
+  smtp_smarthost: "${SMTP_SMARTHOST}"
+  smtp_from: "${SMTP_FROM}"
+  smtp_auth_username: "${SMTP_USERNAME}"
+  smtp_auth_password_file: /tmp/alerting/smtp_password
+  smtp_require_tls: true
+  resolve_timeout: 5m
+
+route:
+  receiver: operator-email
+  group_by: [alertname, app, source_app, slug, budget, policy, event]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # BEGIN deadman
+    - matchers: ['alertname="Watchdog"']
+      receiver: deadman
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 5m
+    # END deadman
+    - matchers: ['alertname="Watchdog"']
+      receiver: blackhole
+    - matchers: ['severity="critical"']
+      receiver: operator-email
+      repeat_interval: 1h
+
+receivers:
+  - name: operator-email
+    email_configs:
+      - to: "${ALERT_EMAIL_TO}"
+        send_resolved: true
+        headers:
+          Subject: '[Kybr {{ .Status | toUpper }}] {{ .CommonLabels.alertname }} {{ .CommonLabels.app }}{{ .CommonLabels.source_app }}'
+  - name: blackhole
+  # BEGIN deadman
+  - name: deadman
+    webhook_configs:
+      - url_file: /tmp/alerting/deadman_url
+        send_resolved: false
+  # END deadman
+
+inhibit_rules:
+  # Credits exhausted already says everything the 80% alert says.
+  - source_matchers: ['alertname="KybrCreditsExhausted"']
+    target_matchers: ['alertname="KybrCreditsUsed80"']
+    equal: [app]

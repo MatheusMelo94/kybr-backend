@@ -23,6 +23,11 @@ primary_region = "gru"
     timeout = "5s"
     grace_period = "30s"
 
+# Security log events as a counter (kybr_log_events_total), for the alerting app.
+[metrics]
+  port = 9598
+  path = "/metrics"
+
 [[vm]]
   size = "shared-cpu-1x"
   memory = "256mb"
