@@ -95,7 +95,7 @@ until [ "$(clamd_ping)" = "PONG" ]; do
 done
 log "clamd ready on /run/clamd/clamd.sock"
 
-(as clamav freshclam --config-file=/etc/clamav/freshclam.conf --daemon --foreground) &
+(as clamav freshclam --config-file=/etc/clamav/freshclam.conf --daemon --foreground --stdout) &
 fresh_pid=$!
 
 # 5. Photo sanitizer: the API image's jar, its own main class, its own user and temp directory. It refuses

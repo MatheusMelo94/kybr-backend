@@ -6,6 +6,7 @@ import com.matheusmelo.kybr.support.upload.TestPdfs;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.MountableFile;
 
@@ -38,6 +40,7 @@ class ClamdScannerClamavIT {
     static void start() throws IOException {
         clamav = new GenericContainer<>(System.getProperty("kybr.it.clamav.image", "clamav/clamav:stable"))
                 .withExposedPorts(3310)
+                .withLogConsumer(new Slf4jLogConsumer(log).withPrefix("clamav"))
                 .waitingFor(Wait.forListeningPort().withStartupTimeout(Duration.ofMinutes(10)));
         String configDir = System.getProperty("kybr.it.clamav.config-dir");
         if (configDir != null) {
@@ -51,6 +54,37 @@ class ClamdScannerClamavIT {
             }
         }
         clamav.start();
+        awaitPong(Duration.ofMinutes(10));
+    }
+
+    /**
+     * A listening port isn't readiness: the signatures load first, and the port can accept and drop
+     * connections meanwhile. Ready means clamd answers {@code zPING} with {@code PONG}.
+     */
+    private static void awaitPong(Duration timeout) throws IOException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        IOException last = null;
+        while (System.nanoTime() < deadline) {
+            try (Socket socket = new Socket(clamav.getHost(), clamav.getMappedPort(3310))) {
+                socket.setSoTimeout(10_000);
+                socket.getOutputStream().write("zPING\0".getBytes(StandardCharsets.US_ASCII));
+                socket.getOutputStream().flush();
+                byte[] reply = socket.getInputStream().readNBytes(5);
+                if ("PONG\0".equals(new String(reply, StandardCharsets.US_ASCII))) {
+                    log.info("real scanner ready (PONG)");
+                    return;
+                }
+            } catch (IOException e) {
+                last = e;
+            }
+            try {
+                Thread.sleep(2_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("interrupted while waiting for clamd", e);
+            }
+        }
+        throw new IOException("clamd did not answer PING within " + timeout, last);
     }
 
     @AfterAll
