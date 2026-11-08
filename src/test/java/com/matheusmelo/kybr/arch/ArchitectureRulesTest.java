@@ -10,6 +10,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noCodeUnits;
 
 import com.matheusmelo.kybr.config.SlugTagLimit;
+import com.matheusmelo.kybr.config.filter.D6CorsFilter;
 import com.matheusmelo.kybr.config.filter.PathFirewallFilter;
 import com.matheusmelo.kybr.model.link.AuditEvent;
 import com.matheusmelo.kybr.repository.AuditEventRepository;
@@ -118,11 +119,15 @@ public class ArchitectureRulesTest {
             "com.matheusmelo.kybr.config.filter.AccessLogFilter.errorUri",
             "com.matheusmelo.kybr.config.filter.AccessLogValve.invoke");
 
-    /** Filters route on the cached {@code RequestPath}, never the raw URI. */
+    /**
+     * Filters route on the cached {@code RequestPath}, never the raw URI. The upload route's CORS
+     * filter runs before the firewall, so it matches the raw URI against a strict pattern that no
+     * path variant satisfies.
+     */
     @ArchTest
     public static final ArchRule FILTERS_DO_NOT_ROUTE_ON_RAW_URI = noClasses()
             .that().resideInAPackage("..config.filter..")
-            .and().doNotBelongToAnyOf(PathFirewallFilter.class)
+            .and().doNotBelongToAnyOf(PathFirewallFilter.class, D6CorsFilter.class)
             .should(callServletMethod(HttpServletRequest.class, "getRequestURI", RAW_URI_LOGGING_ONLY));
 
     /**
@@ -366,7 +371,7 @@ public class ArchitectureRulesTest {
         return false;
     }
 
-    private static byte[] classBytes(JavaClass javaClass) {
+    static byte[] classBytes(JavaClass javaClass) {
         var source = javaClass.getSource().orElseThrow(
                 () -> new IllegalStateException("no class file for " + javaClass.getName()));
         try (InputStream in = source.getUri().toURL().openStream()) {

@@ -1,6 +1,7 @@
 package com.matheusmelo.kybr.service.ratelimit;
 
 import com.matheusmelo.kybr.model.ClientIp;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -174,6 +175,31 @@ public sealed interface RateLimitSubject {
         @Override
         public String value() {
             return caseId.toString();
+        }
+    }
+
+    /**
+     * An e-mail address, lower-cased and trimmed, so its case never splits a counter. Only ever hashed;
+     * the text form never shows it.
+     */
+    record Email(String address) implements RateLimitSubject {
+        public Email {
+            address = requireText(address, "address").strip().toLowerCase(Locale.ROOT);
+        }
+
+        @Override
+        public SubjectKind kind() {
+            return SubjectKind.EMAIL;
+        }
+
+        @Override
+        public String value() {
+            return address;
+        }
+
+        @Override
+        public String toString() {
+            return "Email[redacted]";
         }
     }
 

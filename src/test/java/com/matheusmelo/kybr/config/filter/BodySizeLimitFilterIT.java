@@ -17,7 +17,7 @@ class BodySizeLimitFilterIT extends WebIntegrationTest {
     private static final int MIB = 1024 * 1024;
     private static final String DOCUMENT_UPLOAD = "/public/v/s/cases/t/documents";
     /** The seller document upload cap in application.yml (no route is uncapped). */
-    private static final int DOCUMENT_UPLOAD_CAP = 11 * MIB;
+    private static final int DOCUMENT_UPLOAD_CAP = 10_747_904;
     /** A declared length no machine could buffer: 8 GiB. */
     private static final long HUGE = 8L * 1024 * MIB;
 

@@ -16,6 +16,7 @@ import com.matheusmelo.kybr.service.company.CompanyDataResult.NotFound;
 import com.matheusmelo.kybr.service.company.CompanyDataResult.RateLimited;
 import com.matheusmelo.kybr.service.company.CompanyDataResult.Unavailable;
 import com.matheusmelo.kybr.service.company.CompanyDataResult.Unsupported;
+import java.io.InputStream;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.security.SecureRandom;
@@ -29,6 +30,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -114,7 +116,7 @@ class CnpjaCompanyDataProviderTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"XX", "S1", "SPX", "<b>"})
+    @ValueSource(strings = {"XX", "S P", "S1", "SPX", "<b>"})
     void aStateThatIsNotABrazilianStateCodeMapsToNull(String state) {
         respond(withSuccess(body().replace("\"state\": \"SP\" }", "\"state\": \"" + state + "\" }"),
                 MediaType.APPLICATION_JSON));
@@ -226,6 +228,24 @@ class CnpjaCompanyDataProviderTest {
     }
 
     @Test
+    void aTwoMebibyteBodyIsReadNoFurtherThanTheCapPlusOneByte() {
+        CountingStream twoMebibytes = new CountingStream(2 * 1024 * 1024);
+        respond(withSuccess(new InputStreamResource(twoMebibytes), MediaType.APPLICATION_JSON));
+
+        assertThat(provider.basic(CNPJ)).isInstanceOf(Unavailable.class);
+        assertThat(twoMebibytes.read).isLessThanOrEqualTo(CnpjaCompanyDataProvider.MAX_BODY_BYTES + 1L);
+    }
+
+    @Test
+    void aSmallBodyNestedDeeperThanTheParserAllowsIsUnavailable() {
+        int depth = 200;
+        String nested = body().replaceFirst("\\{", "{ \"deep\": " + "[".repeat(depth) + "]".repeat(depth) + ",");
+        respond(withSuccess(nested, MediaType.APPLICATION_JSON));
+
+        assertThat(provider.basic(CNPJ)).isInstanceOf(Unavailable.class);
+    }
+
+    @Test
     void aBodyJustUnderTheSizeCapIsRead() {
         String padded = body().replaceFirst("\\{", "{ \"padding\": \"" + "x".repeat(1000 * 1000) + "\",");
         respond(withSuccess(padded, MediaType.APPLICATION_JSON));
@@ -272,6 +292,36 @@ class CnpjaCompanyDataProviderTest {
                   "registrations": [ { "state": "SP", "enabled": true } ]
                 }
                 """;
+    }
+
+    /** A stream of {@code size} spaces that counts how many bytes were actually read from it. */
+    private static final class CountingStream extends InputStream {
+        private final long size;
+        private long read;
+
+        CountingStream(long size) {
+            this.size = size;
+        }
+
+        @Override
+        public int read() {
+            if (read >= size) {
+                return -1;
+            }
+            read++;
+            return ' ';
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) {
+            if (read >= size) {
+                return -1;
+            }
+            int n = (int) Math.min(length, size - read);
+            java.util.Arrays.fill(buffer, offset, offset + n, (byte) ' ');
+            read += n;
+            return n;
+        }
     }
 
     private static String randomKey() {

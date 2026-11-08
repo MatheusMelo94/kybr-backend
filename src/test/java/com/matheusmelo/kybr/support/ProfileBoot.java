@@ -45,6 +45,19 @@ public final class ProfileBoot {
         args.add("--KYBR_ADMIN_TOKEN=" + TestSecrets.ADMIN_TOKEN);
         args.add("--KYBR_CNPJA_API_KEY=" + TestSecrets.CNPJA_API_KEY);
         args.add("--KYBR_CNPJA_MONTHLY_CREDITS=10000");
+        args.add("--KYBR_SCANNER_HOST=scanner.example.test");
+        args.add("--KYBR_SCANNER_SPKI_SHA256=" + TestSecrets.SCANNER_SPKI_SHA256);
+        args.add("--KYBR_SCANNER_CLIENT_CERT=" + TestSecrets.SCANNER_CLIENT_CERT);
+        args.add("--KYBR_SCANNER_CLIENT_KEY=" + TestSecrets.SCANNER_CLIENT_KEY);
+        args.add("--KYBR_SCANNER_CA=" + TestSecrets.SCANNER_CA);
+        args.add("--KYBR_SANITIZER_HOST=sanitizer.example.test");
+        args.add("--KYBR_SANITIZER_PORT=3311");
+        args.add("--KYBR_STORAGE_BUCKET=kybr-documents-test");
+        args.add("--KYBR_STORAGE_KMS_KEY_ID=arn:aws:kms:sa-east-1:000000000000:key/00000000-0000-4000-8000-000000000000");
+        args.add("--KYBR_STORAGE_QUARANTINE_BUCKET=kybr-quarantine-test");
+        args.add("--KYBR_STORAGE_QUARANTINE_KMS_KEY_ID=arn:aws:kms:sa-east-1:000000000000:key/00000000-0000-4000-8000-000000000001");
+        args.add("--KYBR_AWS_ROLE_ARN=arn:aws:iam::000000000000:role/kybr-api-test");
+        args.add("--KYBR_RESEND_API_KEY=" + TestSecrets.RESEND_API_KEY);
         return args;
     }
 

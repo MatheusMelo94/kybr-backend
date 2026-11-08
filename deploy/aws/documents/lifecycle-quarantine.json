@@ -1,0 +1,11 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-quarantine-7-days-safety-net",
+      "Status": "Enabled",
+      "Filter": {},
+      "Expiration": { "Days": 7 },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+    }
+  ]
+}

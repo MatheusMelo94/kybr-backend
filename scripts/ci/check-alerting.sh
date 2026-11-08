@@ -16,7 +16,7 @@ set -a
 . deploy/alerting/tests/test-thresholds.vars
 set +a
 
-rule_vars='${APP_MATCH} ${T_LOOKUP_PER_SLUG_15M} ${T_VERIFY_PER_SLUG_15M} ${T_CACHE_READS_PER_SLUG_24H} ${T_CONTACT_LIMITED_1H} ${T_429_PER_POLICY_5M} ${T_IP_UNKNOWN_PER_POLICY_15M} ${T_BFF_REJECTED_5M} ${T_PROVIDER_ERRORS_10M} ${T_5XX_RATIO_5M} ${T_5XX_MIN_COUNT_5M}'
+rule_vars='${APP_MATCH} ${T_LOOKUP_PER_SLUG_15M} ${T_VERIFY_PER_SLUG_15M} ${T_CACHE_READS_PER_SLUG_24H} ${T_CONTACT_LIMITED_1H} ${T_429_PER_POLICY_5M} ${T_IP_UNKNOWN_PER_POLICY_15M} ${T_BFF_REJECTED_5M} ${T_PROVIDER_ERRORS_10M} ${T_5XX_RATIO_5M} ${T_5XX_MIN_COUNT_5M} ${T_UPLOAD_FORMATO_15M} ${T_UPLOAD_LIMITADO_15M} ${T_SCANNER_UNAVAILABLE_10M} ${T_REENCODE_FAILURES_15M} ${T_EMAIL_CAPPED_1H} ${T_SCAN_RESCHEDULED_1H} ${T_SCAN_WAKEUPS_24H}'
 am_vars='${SMTP_SMARTHOST} ${SMTP_FROM} ${SMTP_USERNAME} ${ALERT_EMAIL_TO}'
 
 # The entrypoint renders exactly these variables; keep the two lists identical.
@@ -39,6 +39,6 @@ amtool check-config "$out/alertmanager.yml"
 # Every alert has a signal label that the synthetic-trigger script knows.
 signals=$(grep -oE 'signal: [a-z0-9-]+' "$out/kybr-api.rules.yml" | awk '{print $2}' | sort -u | grep -vx watchdog)
 for s in $signals; do
-  grep -qE "^  $s\)" scripts/alerts/trigger.sh || { echo "::error::no synthetic trigger for signal '$s' in scripts/alerts/trigger.sh"; exit 1; }
+  grep -qE "^  ([a-z0-9-]+\|)*$s(\|[a-z0-9-]+)*\)$" scripts/alerts/trigger.sh || { echo "::error::no synthetic trigger for signal '$s' in scripts/alerts/trigger.sh"; exit 1; }
 done
 echo "Alerting config OK: rules valid, unit tests pass, Alertmanager config valid, every signal has a trigger."

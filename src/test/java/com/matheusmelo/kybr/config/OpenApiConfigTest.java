@@ -31,7 +31,7 @@ class OpenApiConfigTest {
     void publishesTheContractVersionAndTheStaticServers() {
         OpenAPI openApi = customised();
 
-        assertThat(openApi.getInfo().getVersion()).isEqualTo("0.2.0");
+        assertThat(openApi.getInfo().getVersion()).isEqualTo("0.4.0");
         assertThat(openApi.getServers()).extracting(Server::getUrl)
                 .containsExactly("https://api.kybr.com.br", "https://api-staging.kybr.com.br");
     }

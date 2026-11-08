@@ -160,7 +160,7 @@ class LinkRecordsRepositoryIT extends MongoIntegrationTest {
                 "11222333000181", "Maria Exemplo", "pedido-1", "ext-1", POLITICA, null, resultado, UUID.randomUUID(),
                 new Contato(new byte[] {1, 2, 3}, "m•••@example.com", NOW), Processamento.pendente(NOW),
                 NOW.plus(2, ChronoUnit.DAYS), new Revisao(NOW.plus(2, ChronoUnit.DAYS)), UUID.randomUUID().toString(),
-                null);
+                null, null, null, null, null, null);
     }
 
     private static Seller seller(UUID workspaceId) {

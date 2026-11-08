@@ -27,11 +27,24 @@
         <tink.version>1.24.0</tink.version>
         <archunit.version>1.5.1</archunit.version>
         <rest-assured.version>6.3.0</rest-assured.version>
+        <aws-sdk.version>2.57.11</aws-sdk.version>
 
         <!-- Modest test JVM heap; one fork, reused (CI and dev machines alike). -->
         <test.jvm.args>-Xmx512m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -javaagent:${org.mockito:mockito-core:jar}</test.jvm.args>
         <argLine/>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws-sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <dependency>
@@ -69,6 +82,41 @@
             <version>${tink.version}</version>
         </dependency>
 
+        <!-- Document storage: S3 with web-identity (STS) credentials. -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <exclusions>
+                <!-- One small JDK-based HTTP client (url-connection-client) instead of Apache and Netty. -->
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>apache-client</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sts</artifactId>
+            <exclusions>
+                <!-- One small JDK-based HTTP client (url-connection-client) instead of Apache and Netty. -->
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>apache-client</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>url-connection-client</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-configuration-processor</artifactId>

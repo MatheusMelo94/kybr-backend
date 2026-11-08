@@ -26,8 +26,13 @@ import tools.jackson.databind.json.JsonMapper;
  * <p>Ported from the frontend's public-link response schemas at commit {@code 27a781c}, with one
  * agreed relaxation the frontend adopts before it talks to this backend: a {@code processing}
  * result may carry only {@code responsavel} and {@code email_contato_mascarado} (the case read
- * after the seller saved a contact e-mail). Re-sync this class whenever the frontend's schemas
- * change.
+ * after the seller saved a contact e-mail); and one agreed addition the frontend adopts with the
+ * document upload: a document item may carry {@code formato_envio} ({@code pdf} or {@code fotos})
+ * once a file was sent for its type, and, with the asynchronous verification, {@code situacao_envio}
+ * ({@code verificando}, {@code aceito} or {@code recusado}), {@code documentos_recusados} and, only
+ * with {@code recusado}, {@code motivo_recusa} ({@code CONTEUDO_NAO_PERMITIDO},
+ * {@code ARQUIVO_INVALIDO} or {@code VERIFICACAO_FALHOU}). Re-sync this class whenever the frontend's
+ * schemas change.
  *
  * <p>Also checks the backend's own case-read shape rules: which keys each state may carry, and
  * that no internal vocabulary (raw checks, verdict words, policy names) reaches the seller.
@@ -61,7 +66,7 @@ public final class FrontendContract implements Filter {
     private final AtomicInteger checked = new AtomicInteger();
 
     /** Which seller-link operation a request is, or null when it isn't one. */
-    enum Route { INFO, LOOKUP, VERIFY, CASE, CONTACT }
+    public enum Route { INFO, LOOKUP, VERIFY, CASE, CONTACT }
 
     @Override
     public Response filter(FilterableRequestSpecification request, FilterableResponseSpecification responseSpec,
@@ -114,7 +119,7 @@ public final class FrontendContract implements Filter {
     }
 
     /** The violations in one 2xx body of {@code route}; empty when the frontend takes it as is. */
-    static List<String> check(Route route, int status, String body) {
+    public static List<String> check(Route route, int status, String body) {
         List<String> out = new ArrayList<>();
         if (route == Route.CONTACT) {
             if (status != 204 || !body.isEmpty()) {
@@ -314,8 +319,25 @@ public final class FrontendContract implements Filter {
         String where = "itens[" + codigo + "]";
         switch (String.valueOf(codigo)) {
             case "DOCUMENTO_RESPONSAVEL", "DOCUMENTO_SOLICITADO" -> {
-                Set<String> all = Set.of("codigo", "documento_tipo", "documentos_enviados");
-                keys(where, i, all, all, out);
+                Set<String> required = Set.of("codigo", "documento_tipo", "documentos_enviados");
+                keys(where, i, required, Set.of("codigo", "documento_tipo", "documentos_enviados", "formato_envio",
+                        "situacao_envio", "documentos_recusados", "motivo_recusa"), out);
+                if (i.containsKey("formato_envio") && !Set.of("pdf", "fotos").contains(i.get("formato_envio"))) {
+                    out.add(where + ".formato_envio: not pdf or fotos (rejected)");
+                }
+                if (i.containsKey("situacao_envio")
+                        && !Set.of("verificando", "aceito", "recusado").contains(i.get("situacao_envio"))) {
+                    out.add(where + ".situacao_envio: unknown (rejected)");
+                }
+                if (i.containsKey("documentos_recusados")
+                        && (!(i.get("documentos_recusados") instanceof Integer refused) || refused < 0)) {
+                    out.add(where + ".documentos_recusados: not an integer of at least 0");
+                }
+                if (i.containsKey("motivo_recusa") && (!"recusado".equals(i.get("situacao_envio"))
+                        || !Set.of("CONTEUDO_NAO_PERMITIDO", "ARQUIVO_INVALIDO", "VERIFICACAO_FALHOU")
+                                .contains(i.get("motivo_recusa")))) {
+                    out.add(where + ".motivo_recusa: unknown or without recusado (rejected)");
+                }
                 if (!DOCUMENT_TYPES.contains(i.get("documento_tipo"))) {
                     out.add(where + ".documento_tipo: unknown or missing (dropped)");
                 }

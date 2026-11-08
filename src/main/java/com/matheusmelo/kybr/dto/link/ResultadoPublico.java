@@ -88,9 +88,10 @@ public record ResultadoPublico(
     }
 
     /**
-     * A pending item. Document items carry {@code documento_tipo} and {@code documentos_enviados};
-     * {@code SITUACAO_IRREGULAR} carries {@code situacao}; {@code EMPRESA_RECENTE} carries
-     * {@code dias} (at least 1).
+     * A pending item. Document items carry {@code documento_tipo} and {@code documentos_enviados},
+     * plus, once a file was sent for the type, {@code formato_envio}, {@code situacao_envio} and
+     * {@code documentos_recusados} ({@code motivo_recusa} with {@code recusado}); {@code SITUACAO_IRREGULAR}
+     * carries {@code situacao}; {@code EMPRESA_RECENTE} carries {@code dias} (at least 1).
      *
      * @param urlRegularizacao an {@code https:} page on gov.br or a gov.br subdomain
      */
@@ -99,12 +100,52 @@ public record ResultadoPublico(
     public record Item(
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED) CodigoItem codigo,
             @Schema(description = "Present on document items.") DocumentoTipo documentoTipo,
-            @Schema(description = "Present on document items.", minimum = "0") Integer documentosEnviados,
+            @Schema(description = "Present on document items: the type's files accepted or still being checked "
+                    + "(refused files aren't counted).", minimum = "0") Integer documentosEnviados,
+            @Schema(description = "On document items, once a file that still counts was sent for the type: how the "
+                    + "type is being sent. `pdf` takes no more files; `fotos` takes more pages.") FormatoEnvio formatoEnvio,
+            @Schema(description = "On document items, once a file was sent for the type: `verificando` while any of "
+                    + "its files is being checked (poll this read until it changes), then `recusado` when its latest "
+                    + "upload had a refused file, otherwise `aceito`.") SituacaoEnvio situacaoEnvio,
+            @Schema(description = "On document items, once a file was sent for the type: how many of its files were "
+                    + "refused so far, across uploads (it stays after a later accepted upload).", minimum = "0")
+            Integer documentosRecusados,
+            @Schema(description = "With `situacao_envio=recusado`, about the latest upload: `CONTEUDO_NAO_PERMITIDO` "
+                    + "(the file isn't accepted; send a different one), `ARQUIVO_INVALIDO` (it is damaged or unreadable; "
+                    + "send a new copy or photo) or `VERIFICACAO_FALHOU` (it couldn't be checked; send it again).")
+            MotivoRecusa motivoRecusa,
             @Schema(description = "Present on `SITUACAO_IRREGULAR`.") Situacao situacao,
             @Schema(description = "Present on `EMPRESA_RECENTE`: days since the company opened.", minimum = "1")
             Integer dias,
             @Schema(description = "An absolute `https:` URL on gov.br or a gov.br subdomain.")
             String urlRegularizacao) {
+    }
+
+    /**
+     * A document type's verification: {@code verificando} while any of its files is being checked,
+     * then {@code recusado} when its latest upload had a refused file, otherwise {@code aceito}.
+     */
+    public enum SituacaoEnvio {
+        verificando,
+        aceito,
+        recusado
+    }
+
+    /**
+     * Why a file was refused: {@code CONTEUDO_NAO_PERMITIDO} (the file isn't accepted; send a different
+     * one), {@code ARQUIVO_INVALIDO} (it is damaged or unreadable; send a new copy or photo) or
+     * {@code VERIFICACAO_FALHOU} (it couldn't be checked; send it again).
+     */
+    public enum MotivoRecusa {
+        CONTEUDO_NAO_PERMITIDO,
+        ARQUIVO_INVALIDO,
+        VERIFICACAO_FALHOU
+    }
+
+    /** How a document type's files were sent: one PDF, or photos (pages). */
+    public enum FormatoEnvio {
+        pdf,
+        fotos
     }
 
     public enum CodigoItem {

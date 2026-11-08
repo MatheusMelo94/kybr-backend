@@ -1,22 +1,65 @@
 package com.matheusmelo.kybr.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.data.mongodb.core.query.Criteria.where;
+import static org.springframework.data.mongodb.core.query.Query.query;
 
+import com.matheusmelo.kybr.model.document.Document;
+import com.matheusmelo.kybr.model.document.EstadoDocumento;
+import com.matheusmelo.kybr.model.document.FormatoEnvio;
 import com.matheusmelo.kybr.model.link.CompanyCacheEntry;
+import com.matheusmelo.kybr.model.link.Contato;
 import com.matheusmelo.kybr.model.link.CreditLedger;
+import com.matheusmelo.kybr.model.link.EstadoCaso;
 import com.matheusmelo.kybr.model.link.EstadoProcessamento;
 import com.matheusmelo.kybr.model.link.LinkCase;
+import com.matheusmelo.kybr.model.link.OutboxEvent;
+import com.matheusmelo.kybr.model.link.TipoOutbox;
+import com.matheusmelo.kybr.model.workspace.DocumentoTipo;
 import com.matheusmelo.kybr.model.workspace.Plano;
 import com.matheusmelo.kybr.model.workspace.Workspace;
+import com.matheusmelo.kybr.repository.AuditEventRepository;
 import com.matheusmelo.kybr.repository.CreditLedgerOps;
+import com.matheusmelo.kybr.repository.DocumentRepository;
 import com.matheusmelo.kybr.repository.LinkCaseRepository;
+import com.matheusmelo.kybr.repository.OutboxClaims;
+import com.matheusmelo.kybr.repository.OutboxEventRepository;
+import com.matheusmelo.kybr.repository.RetentionClaims;
 import com.matheusmelo.kybr.repository.WorkspaceRepository;
 import com.matheusmelo.kybr.service.MetricTags;
 import com.matheusmelo.kybr.service.company.ProviderBudgets;
 import com.matheusmelo.kybr.service.company.RuntimeFlagsService;
+import com.matheusmelo.kybr.service.crypto.FieldCipher;
+import com.matheusmelo.kybr.service.email.EmailService;
+import com.matheusmelo.kybr.service.email.NotificationDispatcher;
+import com.matheusmelo.kybr.service.email.TemplateRenderer;
+import com.matheusmelo.kybr.service.email.TestDispatchers;
+import com.matheusmelo.kybr.service.ratelimit.RateLimiter;
+import com.matheusmelo.kybr.service.retention.OrphanReconciliationJob;
+import com.matheusmelo.kybr.service.retention.RetentionJob;
+import com.matheusmelo.kybr.service.scan.ClamdScanner;
+import com.matheusmelo.kybr.service.scan.ScanLinkTls;
+import com.matheusmelo.kybr.service.scan.ScannerWake;
+import com.matheusmelo.kybr.service.scan.SignatureMonitor;
+import com.matheusmelo.kybr.service.storage.DocumentStorage;
+import com.matheusmelo.kybr.service.storage.S3DocumentStorage;
+import com.matheusmelo.kybr.service.upload.UploadService;
+import com.matheusmelo.kybr.service.upload.scan.ScanDispatcher;
+import com.matheusmelo.kybr.service.upload.scan.ScanWorker;
+import com.matheusmelo.kybr.support.MovableClock;
+import com.matheusmelo.kybr.support.email.ScriptedEmailSender;
 import com.matheusmelo.kybr.support.link.TestCases;
 import com.matheusmelo.kybr.support.link.TestWorkspaces;
-import com.matheusmelo.kybr.support.web.WebIntegrationTest;
+import com.matheusmelo.kybr.support.tls.FakeClamd;
+import com.matheusmelo.kybr.support.tls.TestPki;
+import com.matheusmelo.kybr.support.upload.ScriptedStorage;
+import com.matheusmelo.kybr.support.upload.StubS3Server;
+import com.matheusmelo.kybr.support.upload.TestFiles;
+import com.matheusmelo.kybr.support.upload.TestImages;
+import com.matheusmelo.kybr.support.upload.TestPdfs;
+import com.matheusmelo.kybr.support.upload.UploadWebIntegrationTest;
+import com.matheusmelo.kybr.support.web.LimiterClock;
+import com.matheusmelo.kybr.util.EmailMasker;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -24,12 +67,19 @@ import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.Timer;
 import io.restassured.RestAssured;
 import io.restassured.response.Response;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -44,16 +94,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalManagementPort;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
+import org.springframework.transaction.PlatformTransactionManager;
 
 /**
- * The metrics the alert rules fire on: each one is registered and moves under its trigger, and no
- * metric name or tag value carries a CNPJ, an e-mail or an IP. The registry checks drive every
- * scenario themselves, so each test passes alone and in any order.
+ * The metrics the alert rules fire on: each one is registered and moves under its trigger, no
+ * metric name or tag value carries a CNPJ, an e-mail, an IP, a case token or a filename, and the
+ * document, e-mail and retention metrics tag only with fixed enumerations. The registry checks drive
+ * every scenario themselves, so each test passes alone and in any order.
  */
-class MetricsCatalogueIT extends WebIntegrationTest {
+class MetricsCatalogueIT extends UploadWebIntegrationTest {
 
     /** Every application metric an alert rule or dashboard reads. */
     static final List<String> CATALOGUE = List.of(
@@ -75,7 +127,24 @@ class MetricsCatalogueIT extends WebIntegrationTest {
             "kybr.verification.deferred",
             "kybr.verification.failed",
             "kybr.idempotency.completion_missing",
-            "kybr.admin.auth_failed");
+            "kybr.admin.auth_failed",
+            "kybr.upload",
+            "kybr.upload.malware",
+            "kybr.image.reencode",
+            "kybr.scanner.calls",
+            "kybr.scanner.signature_age_hours",
+            "kybr.storage.calls",
+            "kybr.email.sent",
+            "kybr.email.capped",
+            "kybr.email.failed",
+            "kybr.retention.processed",
+            "kybr.retention.failed",
+            "kybr.retention.orphans_deleted",
+            "kybr.scan.result",
+            "kybr.scan.wake_seconds",
+            "kybr.scan.backlog",
+            "kybr.scan.backlog_oldest_age_seconds",
+            "kybr.scan.stuck");
 
     private static final String FOUND = "12345678000195";
     private static final String OTHER_FOUND = "25873916000187";
@@ -86,6 +155,18 @@ class MetricsCatalogueIT extends WebIntegrationTest {
     private static final ZoneId SAO_PAULO = ZoneId.of("America/Sao_Paulo");
     private static final Duration WAIT = Duration.ofSeconds(15);
 
+    /** The multipart filename every upload here sends; no metric may carry it. */
+    private static final String FILENAME = "documento-metricas.bin";
+    /** The tag keys the document, scanner, storage, e-mail and retention metrics may use. */
+    private static final Set<String> BOUNDED_TAG_KEYS = Set.of("resultado", "operacao", "tipo", "motivo", "estado");
+    private static final Pattern BOUNDED_TAG_VALUE = Pattern.compile("[a-z][a-z_-]*");
+    /**
+     * The live signature monitor, built once against the context's registry (the test profile runs
+     * the stub scanner, which has no signature database). Held here so the gauge's weak reference
+     * stays live across tests.
+     */
+    private static SignatureMonitor signatures;
+
     private static final Pattern CNPJ = Pattern.compile(
             "\\d{14}|\\d{2}\\.\\d{3}\\.\\d{3}/\\d{4}-\\d{2}|[0-9A-Z]{12}\\d{2}");
     private static final Pattern EMAIL = Pattern.compile("[^\\s@]+@[^\\s@]+");
@@ -94,6 +175,8 @@ class MetricsCatalogueIT extends WebIntegrationTest {
 
     @Autowired
     private MeterRegistry meters;
+    @Autowired
+    private ScanDispatcher scans;
     @Autowired
     private WorkspaceRepository workspaces;
     @Autowired
@@ -104,8 +187,23 @@ class MetricsCatalogueIT extends WebIntegrationTest {
     private CreditLedgerOps ledger;
     @Autowired
     private RuntimeFlagsService flags;
+
     @Autowired
-    private MongoTemplate mongo;
+    private RetentionClaims retentionClaims;
+    @Autowired
+    private DocumentRepository documents;
+    @Autowired
+    private OutboxEventRepository outbox;
+    @Autowired
+    private AuditEventRepository audits;
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+    @Autowired
+    private OutboxClaims outboxClaims;
+    @Autowired
+    private FieldCipher cipher;
+    @Autowired
+    private RateLimiter limiter;
 
     @LocalManagementPort
     private int managementPort;
@@ -271,6 +369,152 @@ class MetricsCatalogueIT extends WebIntegrationTest {
     }
 
     @Test
+    void uploadsMalwareAndPhotoReencodesAreCounted() {
+        // its own rate-limit window, so the shared loopback address never runs into the per-IP limit
+        LimiterClock.INSTANCE.freeze(Instant.now().plus(Duration.ofDays(ThreadLocalRandom.current().nextInt(1, 3_650))));
+        try {
+            assertMoves(() -> count(UploadService.METRIC, "resultado", "aceito"),
+                    () -> upload(TIPO, TestImages.jpegWithMetadata(32, 24)));
+            assertMoves(() -> count(ScanWorker.REENCODE_METRIC, "resultado", "ok"), () -> {
+                upload(TIPO, TestImages.png(20, 20));
+                scans.runOnce();
+            });
+            assertMoves(() -> count(UploadService.METRIC, "resultado", "formato"),
+                    () -> upload(TIPO, TestFiles.eicar()));
+            scans.runOnce();
+            scanner.infectedOnCall(scanner.calls() + 1, "Kybr.Test.Signature");
+            assertMoves(() -> count(ScanWorker.MALWARE_METRIC), () -> {
+                upload(OTHER_TIPO, TestPdfs.plain());
+                scans.runOnce();
+            });
+        } finally {
+            LimiterClock.INSTANCE.release();
+        }
+    }
+
+    /**
+     * The live scanner and storage count their own calls; the test profile runs their stand-ins, so
+     * they are built here against the test servers and the context's registry.
+     */
+    @Test
+    void scanSessionsCountTheirWakeUpsAndOutcomesAndTheBacklogIsAGauge() {
+        // its own rate-limit window, so the shared loopback address never runs into the per-IP limit
+        LimiterClock.INSTANCE.freeze(Instant.now().plus(Duration.ofDays(ThreadLocalRandom.current().nextInt(1, 3_650))));
+        TestCases.Built fresh = seedCase(EstadoCaso.pending);
+        try {
+            assertMoves(() -> count(ScanWorker.RESULT_METRIC, "resultado", "aceito"), () -> {
+                upload(fresh, TIPO, TestPdfs.plain());
+                scans.runOnce();
+            });
+            assertThat(meters.get(ScannerWake.METRIC).tag("resultado", "ok").timer().count()).isPositive();
+            assertMoves(() -> count(ScanWorker.RESULT_METRIC, "resultado", "recusado_conteudo"), () -> {
+                upload(fresh, OTHER_TIPO, TestPdfs.withScannerMarker());
+                scans.runOnce();
+            });
+            scanner.unavailable();
+            assertMoves(() -> count(ScanWorker.RESULT_METRIC, "resultado", "reagendado"), () -> {
+                upload(fresh, OTHER_TIPO, TestImages.jpeg(9, 9));
+                scans.runOnce();
+            });
+            mongo.updateMulti(query(where(Document.CASE_ID).is(fresh.linkCase().id())
+                            .and(Document.ESTADO).is(EstadoDocumento.RECEBIDO)),
+                    new Update().set(Document.TENTATIVAS, 5).set(Document.PROXIMA_TENTATIVA, Instant.now()),
+                    Document.class);
+            assertMoves(() -> count(ScanWorker.RESULT_METRIC, "resultado", "recusado_falhou"), () -> scans.runOnce());
+        } finally {
+            scanner.reset();
+            LimiterClock.INSTANCE.release();
+        }
+        assertThat(meters.get(ScanDispatcher.BACKLOG_GAUGE).tag("estado", "recebido").gauge()).isNotNull();
+        assertThat(meters.get(ScanDispatcher.OLDEST_GAUGE).gauge()).isNotNull();
+        assertThat(meters.get(ScanDispatcher.STUCK_GAUGE).gauge()).isNotNull();
+    }
+
+    @Test
+    void theLiveScannerAndStorageCountTheirCallsAndTheSignatureAgeIsAGauge() throws IOException {
+        TestPki pki = TestPki.authority("Metrics Test CA");
+        TestPki.Identity server = pki.issue("scanner", "dns:localhost,ip:127.0.0.1");
+        TestPki.Identity client = pki.issue("api-client", null);
+        byte[] pdf = TestPdfs.plain();
+        try (FakeClamd clamd = new FakeClamd(pki.serverContext(server)).replying("stream: OK\0")) {
+            ClamdScanner live = new ClamdScanner(
+                    ScanLinkTls.fromPem(client.certificatePem(), client.keyPem(), pki.caPem(), server.spkiSha256()),
+                    "localhost", clamd.port(), Duration.ofSeconds(3), Duration.ofSeconds(5), meters);
+            assertMoves(() -> count(ClamdScanner.METRIC, "resultado", "clean"),
+                    () -> live.scan(new ByteArrayInputStream(pdf), pdf.length));
+        }
+
+        try (StubS3Server s3 = new StubS3Server()) {
+            KybrProperties.Storage settings = new KybrProperties.Storage(KybrProperties.Storage.Mode.S3, "kybr-docs-test",
+                    "sa-east-1", "arn:aws:kms:sa-east-1:000000000000:key/00000000-0000-4000-8000-000000000000",
+                    "kybr-quarantine-test", "arn:aws:kms:sa-east-1:000000000000:key/00000000-0000-4000-8000-000000000001",
+                    null, "sts.amazonaws.com", "test-only-access-key-id", "test-only-secret-access-key-0000000000000",
+                    s3.endpoint(), Duration.ofSeconds(2), Duration.ofSeconds(5));
+            S3DocumentStorage live = new S3DocumentStorage(S3Config.s3Client(settings),
+                    new S3DocumentStorage.Bucket(settings.bucket(), settings.kmsKeyId()),
+                    new S3DocumentStorage.Bucket(settings.quarantineBucket(), settings.quarantineKmsKeyId()), meters);
+            String key = DocumentStorage.key(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+            assertMoves(() -> count(S3DocumentStorage.METRIC, "operacao", "put", "resultado", "ok"),
+                    () -> live.put(DocumentStorage.Area.FINAL, key, new ByteArrayInputStream(pdf), pdf.length, "application/pdf", Map.of()));
+        }
+
+        signatureMonitor().check();
+        assertThat(gauge(SignatureMonitor.GAUGE)).isGreaterThanOrEqualTo(3.0);
+    }
+
+    @Test
+    void sentCappedAndFailedEmailsAreCountedByType() {
+        mongo.remove(new Query(), OutboxEvent.class); // the dispatcher claims every pending event
+        ScriptedEmailSender sender = new ScriptedEmailSender();
+        EmailService emails = new EmailService(new TemplateRenderer(), limiter, sender,
+                new KybrProperties.Email.Caps(1, 10), meters);
+        NotificationDispatcher dispatcher = TestDispatchers.withNoticeOn(outboxClaims, cases, cipher, emails,
+                Clock.systemUTC(), meters);
+        String once = newAddress();
+
+        assertMoves(() -> count("kybr.email.sent", "tipo", "contato-alterado"), () -> {
+            queueAddressChange(once);
+            dispatcher.runOnce();
+        });
+        assertMoves(() -> count("kybr.email.capped", "tipo", "contato-alterado"), () -> {
+            queueAddressChange(once);
+            dispatcher.runOnce();
+        });
+        sender.permanentOnCall(sender.calls().size() + 1);
+        assertMoves(() -> count("kybr.email.failed", "tipo", "contato-alterado", "motivo", "permanente"), () -> {
+            queueAddressChange(newAddress());
+            dispatcher.runOnce();
+        });
+    }
+
+    /** The jobs run here on a scripted store, so a deletion can be made to fail. */
+    @Test
+    void retentionRunsFailuresAndOrphanDeletionsAreCounted() {
+        MovableClock clock = new MovableClock(Instant.now().truncatedTo(ChronoUnit.MILLIS));
+        ScriptedStorage store = new ScriptedStorage(clock);
+        RetentionJob retention = new RetentionJob(retentionClaims, documents, outbox, audits, store,
+                transactionManager, properties, clock, meters);
+        OrphanReconciliationJob orphans = new OrphanReconciliationJob(workspaces, documents, audits, store, properties,
+                clock, meters);
+
+        store.failDeleteOnCall(1);
+        assertMoves(() -> count("kybr.retention.failed"), () -> {
+            dueCase(store, clock);
+            retention.runOnce();
+        });
+        assertMoves(() -> count("kybr.retention.processed"), () -> {
+            dueCase(store, clock);
+            retention.runOnce();
+        });
+
+        Workspace owner = workspaces.save(TestWorkspaces.builder().slug(newSlug()).build());
+        store.put(DocumentStorage.Area.FINAL, DocumentStorage.key(owner.id(), UUID.randomUUID(), UUID.randomUUID()),
+                new ByteArrayInputStream(new byte[] {1}), 1, "application/pdf", Map.of());
+        clock.advance(properties.retention().orphanMinAge().plusSeconds(1));
+        assertMoves(() -> count("kybr.retention.orphans_deleted"), orphans::runOnce);
+    }
+
+    @Test
     void randomSlugsAddNoApplicationTimeSeries() {
         lookupUnknownSlug();
         Set<Meter.Id> before = meterIds();
@@ -300,17 +544,35 @@ class MetricsCatalogueIT extends WebIntegrationTest {
     }
 
     @Test
-    void noMetricNameOrTagValueCarriesACnpjAnEmailOrAnIp() {
+    void noMetricNameOrTagValueCarriesACnpjAnEmailAnIpATokenOrAFilename() {
         driveEveryScenario();
         for (Meter meter : meters.getMeters()) {
             Meter.Id id = meter.getId();
             assertThat(id.getName()).doesNotContainPattern(CNPJ).doesNotContainPattern(EMAIL).doesNotContainPattern(IP);
             for (Tag tag : id.getTags()) {
                 assertThat(tag.getValue()).as(id.getName() + "{" + tag.getKey() + "}")
-                        .doesNotContainPattern(CNPJ).doesNotContainPattern(EMAIL);
+                        .doesNotContainPattern(CNPJ).doesNotContainPattern(EMAIL)
+                        .doesNotContain(pending.token()).doesNotContain(FILENAME);
                 if (!isDatabaseServerAddress(id, tag)) {
                     assertThat(tag.getValue()).as(id.getName() + "{" + tag.getKey() + "}").doesNotContainPattern(IP);
                 }
+            }
+        }
+    }
+
+    /** The document, scanner, storage, e-mail and retention metrics tag only with fixed enumerations. */
+    @Test
+    void documentAndEmailMetricsUseOnlyBoundedTags() {
+        driveEveryScenario();
+        List<Meter.Id> ids = meters.getMeters().stream().map(Meter::getId)
+                .filter(id -> id.getName().matches("kybr\\.(upload|image|scanner|scan|storage|email|retention)(\\..*)?"))
+                .toList();
+
+        assertThat(ids).isNotEmpty();
+        for (Meter.Id id : ids) {
+            for (Tag tag : id.getTags()) {
+                assertThat(tag.getKey()).as(id.getName()).isIn(BOUNDED_TAG_KEYS);
+                assertThat(tag.getValue()).as(id.getName() + "{" + tag.getKey() + "}").matches(BOUNDED_TAG_VALUE);
             }
         }
     }
@@ -322,7 +584,12 @@ class MetricsCatalogueIT extends WebIntegrationTest {
                 this::noDataTheNoDataCapDeferralsAndFailuresAreCounted,
                 this::everyBudgetWarnsAndThenReportsExhaustion,
                 this::rateLimitsContactChurnTheIdempotencyGuardAndAdminAuthFailuresAreCounted,
-                this::aMissingClientIpCountsAsExpectedOnlyWhereTheRouteExpectsOne);
+                this::aMissingClientIpCountsAsExpectedOnlyWhereTheRouteExpectsOne,
+                this::uploadsMalwareAndPhotoReencodesAreCounted,
+                this::scanSessionsCountTheirWakeUpsAndOutcomesAndTheBacklogIsAGauge,
+                this::liveAdapters,
+                this::sentCappedAndFailedEmailsAreCountedByType,
+                this::retentionRunsFailuresAndOrphanDeletionsAreCounted);
         for (Runnable scenario : scenarios) {
             freshBudgetsAndSwitches();
             scenario.run();
@@ -333,6 +600,63 @@ class MetricsCatalogueIT extends WebIntegrationTest {
     /** The driver's own pool and command meters name the database server; that is no client's IP. */
     private static boolean isDatabaseServerAddress(Meter.Id id, Tag tag) {
         return id.getName().startsWith("mongodb.driver.") && tag.getKey().equals("server.address");
+    }
+
+    private void liveAdapters() {
+        try {
+            theLiveScannerAndStorageCountTheirCallsAndTheSignatureAgeIsAGauge();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private SignatureMonitor signatureMonitor() {
+        if (signatures == null) {
+            signatures = new SignatureMonitor(() -> Optional.of(Instant.now().minus(Duration.ofHours(3))),
+                    Duration.ofHours(48), Clock.systemUTC(), meters);
+        }
+        return signatures;
+    }
+
+    private void upload(DocumentoTipo tipo, byte[] file) {
+        upload(pending, tipo, file);
+    }
+
+    private void upload(TestCases.Built linkCase, DocumentoTipo tipo, byte[] file) {
+        httpWithoutKey().multiPart("tipo", tipo.name())
+                .multiPart("arquivos", FILENAME, file, "application/octet-stream")
+                .post("/public/v/{slug}/cases/{token}/documents", workspace.slug(), linkCase.token());
+    }
+
+    private static String newAddress() {
+        return "antigo." + UUID.randomUUID() + "@example.test";
+    }
+
+    /** A case whose contact changed away from {@code oldAddress}, with its pending notice in the outbox. */
+    private void queueAddressChange(String oldAddress) {
+        UUID caseId = UUID.randomUUID();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        String current = "novo." + UUID.randomUUID() + "@example.test";
+        cases.save(TestCases.builder(TestWorkspaces.builder().slug(newSlug()).build()).id(caseId)
+                .contato(new Contato(cipher.encrypt(current, caseId), EmailMasker.mask(current), now))
+                .build().linkCase());
+        UUID eventId = UUID.randomUUID();
+        mongo.insert(new OutboxEvent(eventId, TipoOutbox.CONTATO_ALTERADO, caseId, cipher.encrypt(oldAddress, eventId),
+                now, now.plus(Duration.ofDays(30))));
+    }
+
+    /** A case past its retention date holding one stored document. */
+    private void dueCase(ScriptedStorage store, Clock clock) {
+        Workspace owner = workspaces.save(TestWorkspaces.builder().slug(newSlug()).build());
+        UUID caseId = UUID.randomUUID();
+        cases.save(TestCases.builder(owner).id(caseId).retencaoAte(clock.instant().minusSeconds(1))
+                .criadoEm(clock.instant().minus(Duration.ofDays(400))).build().linkCase());
+        UUID documentId = UUID.randomUUID();
+        String key = DocumentStorage.key(owner.id(), caseId, documentId);
+        store.put(DocumentStorage.Area.FINAL, key, new ByteArrayInputStream(new byte[] {1}), 1, "application/pdf", Map.of());
+        documents.save(new Document(documentId, owner.id(), caseId, null, DocumentoTipo.CARTAO_CNPJ, FormatoEnvio.pdf,
+                1, key, "application/pdf", 1, 1, documentId.toString().replace("-", "") + "0".repeat(32),
+                "d".repeat(64), clock.instant()));
     }
 
     private Response lookup(Workspace workspace, String cnpj) {
@@ -429,11 +753,6 @@ class MetricsCatalogueIT extends WebIntegrationTest {
 
     private static String newSlug() {
         return "loja-" + UUID.randomUUID().toString().substring(0, 8);
-    }
-
-    private static String randomIp() {
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        return "203.0." + random.nextInt(256) + "." + random.nextInt(1, 255);
     }
 
     private static void awaitUntil(BooleanSupplier condition) {

@@ -21,6 +21,8 @@ server:
   tomcat:
     accesslog:
       enabled: false # AccessLogFilter writes the only access log
+    max-part-count: 32 # document upload: 30 files + the tipo field + margin
+    max-part-header-size: 8KB # a 255-character UTF-8 file name sent as both filename and filename*
 
 spring:
   application:
@@ -38,7 +40,14 @@ spring:
       add-mappings: false # no static resources, so no directory redirects
   servlet:
     multipart:
-      enabled: false # off until the seller document upload needs it, and then for that route only
+      # Only the seller document upload accepts multipart (BodySizeLimitFilter refuses it elsewhere).
+      # Parts are parsed only when the handler asks, after every check that needs no body.
+      enabled: true
+      resolve-lazily: true
+      file-size-threshold: 0 # every part goes to disk, never to memory
+      max-file-size: 10MB # 10 MiB
+      max-request-size: 10747904B # 10 MiB of files + 256 KiB of multipart overhead: the document upload body cap
+      location: ${kybr.upload.temp-dir}
   mvc:
     log-request-details: false
 
@@ -106,7 +115,7 @@ kybr:
     multipart:
       - method: POST
         pattern: "/public/v/{slug}/cases/{token}/documents"
-        max-body: 11MB # document upload: one tipo per request, 10 MiB of files + multipart overhead; B2 confirms
+        max-body: ${spring.servlet.multipart.max-request-size} # one tipo per request, at most 30 files
   logging:
     token-prefixes:
       - cases # the next path segment is a case token, redacted in logs
@@ -180,3 +189,95 @@ kybr:
     allow-explicit-slug: false # true outside prod only; prod refuses to start with it on
   metrics:
     max-slug-tags: 500
+  # Seller document upload.
+  upload:
+    max-bytes-per-tipo: 10MB # 10 MiB of original file bytes per document type, across calls
+    max-files-per-case: 30
+    concurrency: 2 # uploads per machine past the cheap checks
+    reencode-concurrency: 2
+    temp-dir: ${KYBR_UPLOAD_TEMP_DIR:${java.io.tmpdir}/kybr-uploads} # dedicated and size-bounded; wiped at startup
+    limits:
+      ip: { limit: 120, window: 10m } # per socket IP
+      ip-unknown: { limit: 300, window: 10m } # per link, when the IP is unknown
+      case: { limit: 60, window: 1d }
+  # Photos are decoded only by the sanitizer service in the isolated scanner organisation.
+  image:
+    mode: ${KYBR_IMAGE_MODE:remote} # the sanitizer service; prod refuses anything else
+    max-pixels: 50000000
+    max-side: 12000
+    target-long-edge: 4000
+  sanitizer:
+    host: ${KYBR_SANITIZER_HOST:} # required in prod
+    port: ${KYBR_SANITIZER_PORT:} # required in prod
+    timeout: 20s
+    max-response: 12MB
+  # Malware scanner. stub flags test signatures only; clamd is the isolated scanner over mutual TLS (prod).
+  scanner:
+    mode: ${KYBR_SCANNER_MODE:stub}
+    host: ${KYBR_SCANNER_HOST:}
+    port: ${KYBR_SCANNER_PORT:3310}
+    connect-timeout: 3s
+    read-timeout: 20s
+    max-signature-age: 48h # older signatures: the scan session's files wait and an alert fires
+    spki-sha256: ${KYBR_SCANNER_SPKI_SHA256:} # pin of the scanner certificate's public key
+    client-cert: ${KYBR_SCANNER_CLIENT_CERT:}
+    client-key: ${KYBR_SCANNER_CLIENT_KEY:}
+    ca: ${KYBR_SCANNER_CA:}
+  # The asynchronous scan job: quarantine -> scan (+ photo re-encode) -> accepted or refused.
+  scan:
+    enabled: ${KYBR_SCAN_ENABLED:true} # tests run it on demand; prod refuses false
+    workers: 2
+    poll-interval: 10s
+    wake-timeout: 120s # a stopped scanner machine starts on the first connection
+    wake-interval: 5s
+    lease: 5m
+    max-attempts: 6
+    backoff: 1m,5m,15m,1h,3h
+    stuck-after: 24h
+  # Document storage. memory keeps objects in the process; s3 is the private, KMS-encrypted bucket (prod).
+  storage:
+    mode: ${KYBR_STORAGE_MODE:memory}
+    bucket: ${KYBR_STORAGE_BUCKET:}
+    region: sa-east-1
+    kms-key-id: ${KYBR_STORAGE_KMS_KEY_ID:}
+    quarantine-bucket: ${KYBR_STORAGE_QUARANTINE_BUCKET:} # received files until scanned; its own bucket
+    quarantine-kms-key-id: ${KYBR_STORAGE_QUARANTINE_KMS_KEY_ID:} # and its own key
+    role-arn: ${KYBR_AWS_ROLE_ARN:} # assumed with the platform's identity token
+    oidc-audience: sts.amazonaws.com
+    access-key-id: ${KYBR_AWS_ACCESS_KEY_ID:} # static-key fallback only
+    secret-access-key: ${KYBR_AWS_SECRET_ACCESS_KEY:}
+    connect-timeout: 3s
+    call-timeout: 30s
+  # Transactional e-mail. recording keeps messages in memory; resend sends (prod).
+  email:
+    mode: ${KYBR_EMAIL_MODE:recording}
+    api-key: ${KYBR_RESEND_API_KEY:} # header only, never in a URL or a log
+    base-url: https://api.resend.com
+    from: "Kybr <nao-responda@kybr.com.br>"
+    dns-verified: ${KYBR_EMAIL_DNS_VERIFIED:false} # nothing is sent until the domain's DNS records are published
+    test-recipients: ${KYBR_EMAIL_TEST_RECIPIENTS:} # comma-separated; the operator test e-mail goes nowhere else
+    connect-timeout: 3s
+    read-timeout: 10s
+    caps:
+      per-hour: 3 # per address; more are dropped
+      per-day: 10
+    events:
+      contato-alterado:
+        enabled: ${KYBR_EMAIL_CONTATO_ALTERADO_ENABLED:false} # off until the notice has its copy
+    dispatcher:
+      enabled: true # off only in tests; prod refuses to start with it off
+      interval: 10s
+      lease: 60s
+      backoff: [1m, 10m, 1h]
+  retention:
+    enabled: true # off only in tests; prod refuses to start with it off
+    backstop: P12M # a never-decided case's documents go this long after the seller's last activity
+    interval: 1h
+    backstop-interval: 1d
+    orphan-interval: 7d
+    orphan-min-age: 24h
+    lease: 5m
+  cors:
+    d6: # the seller document upload, called from the browser
+      origins: [https://kybr.com.br]
+      origin-patterns: []

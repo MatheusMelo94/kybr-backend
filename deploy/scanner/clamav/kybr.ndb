@@ -1,0 +1,9 @@
+Kybr.Test.ScannerMarker:0:*:4b5942522d5343414e4e45522d53454c46544553542d3545314637443343
+Kybr.PDF.ActiveContent.JavaScript:0:*:2f4a617661536372697074
+Kybr.PDF.ActiveContent.JS:10:*:2f4a53(00|09|0a|0c|0d|20|28|29|3c|3e|5b|5d|7b|7d|2f|25)
+Kybr.PDF.ActiveContent.AA:10:*:2f4141(00|09|0a|0c|0d|20|28|29|3c|3e|5b|5d|7b|7d|2f|25)
+Kybr.PDF.ActiveContent.OpenAction:0:*:2f4f70656e416374696f6e
+Kybr.PDF.ActiveContent.Launch:0:*:2f4c61756e6368(00|09|0a|0c|0d|20|28|29|3c|3e|5b|5d|7b|7d|2f|25)
+Kybr.PDF.ActiveContent.EmbeddedFile:0:*:2f456d62656464656446696c65
+Kybr.PDF.ActiveContent.RichMedia:0:*:2f526963684d65646961
+Kybr.PDF.ActiveContent.XFA:0:*:2f584641(00|09|0a|0c|0d|20|28|29|3c|3e|5b|5d|7b|7d|2f|25)

@@ -42,6 +42,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import tools.jackson.core.JacksonException;
@@ -155,6 +157,22 @@ public class GlobalExceptionHandler {
             return;
         }
         // Malformed JSON, duplicate keys, trailing tokens, a missing or unreadable body.
+        write(response, ErrorCode.REQUISICAO_INVALIDA);
+    }
+
+    /**
+     * A multipart body the container couldn't parse (a cut-off final boundary, no {@code boundary}
+     * parameter, a malformed part) is the client's mistake: 400, logged at INFO by class only. Size
+     * and part-count limits, and a body cap passed while streaming, keep their own codes.
+     */
+    @ExceptionHandler(MultipartException.class)
+    void malformedMultipart(MultipartException ex, HttpServletResponse response) throws IOException {
+        if (ex instanceof MaxUploadSizeExceededException || ex instanceof ErrorResponse
+                || UnhandledExceptions.wrappedApiException(ex).isPresent()) {
+            unexpected(ex, response);
+            return;
+        }
+        log.info("event=malformed_multipart exception={}", ex.getClass().getSimpleName());
         write(response, ErrorCode.REQUISICAO_INVALIDA);
     }
 

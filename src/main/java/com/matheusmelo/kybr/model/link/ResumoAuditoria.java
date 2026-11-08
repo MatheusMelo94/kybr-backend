@@ -14,6 +14,9 @@ import org.springframework.data.mongodb.core.mapping.Field;
  * @param slug the workspace slug an operator acted on (not personal data)
  * @param slugExplicito an operator chose the slug instead of it being assigned
  * @param ativo the value an operator set a switch to
+ * @param documentos how many stored documents a system job deleted (a count, never a key)
+ * @param contatoRemovido whether a system job removed a contact e-mail
+ * @param documento an upload's type, file hashes and sizes, or the scanner's signature name
  */
 public record ResumoAuditoria(
         @Field("cnpj_mascarado") String cnpjMascarado,
@@ -21,7 +24,10 @@ public record ResumoAuditoria(
         @Field("novo_mascarado") String novoMascarado,
         @Field("slug") String slug,
         @Field("slug_explicito") Boolean slugExplicito,
-        @Field("ativo") Boolean ativo) {
+        @Field("ativo") Boolean ativo,
+        @Field("documentos") Integer documentos,
+        @Field("contato_removido") Boolean contatoRemovido,
+        @Field("documento") ResumoDocumento documento) {
 
     /** Five or more digits in a row: a CNPJ or CPF fragment long enough to identify someone. */
     private static final Pattern DIGIT_RUN = Pattern.compile("\\d{5,}");
@@ -32,6 +38,22 @@ public record ResumoAuditoria(
         requireMasked("cnpj_mascarado", cnpjMascarado);
         requireMasked("anterior_mascarado", anteriorMascarado);
         requireMasked("novo_mascarado", novoMascarado);
+    }
+
+    /** Details without the system-job counts or an upload summary. */
+    public ResumoAuditoria(String cnpjMascarado, String anteriorMascarado, String novoMascarado, String slug,
+            Boolean slugExplicito, Boolean ativo) {
+        this(cnpjMascarado, anteriorMascarado, novoMascarado, slug, slugExplicito, ativo, null, null, null);
+    }
+
+    /** A retention run: how many documents were deleted and whether a contact was removed. */
+    public static ResumoAuditoria ofRetencao(int documentos, boolean contatoRemovido) {
+        return new ResumoAuditoria(null, null, null, null, null, null, documentos, contatoRemovido, null);
+    }
+
+    /** An upload: its type, file hashes and sizes, or the scanner's signature name. */
+    public static ResumoAuditoria ofDocumento(ResumoDocumento documento) {
+        return new ResumoAuditoria(null, null, null, null, null, null, null, null, documento);
     }
 
     public static ResumoAuditoria ofCnpj(String cnpjMascarado) {

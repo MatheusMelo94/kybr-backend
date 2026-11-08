@@ -65,6 +65,21 @@ class LogRedactionTest {
     }
 
     @Test
+    void masksTheScannerKeyTheEmailKeyAndTheStorageKeys() {
+        MockEnvironment env = new MockEnvironment()
+                .withProperty("kybr.scanner.client-key", TestSecrets.SCANNER_CLIENT_KEY)
+                .withProperty("kybr.email.api-key", TestSecrets.RESEND_API_KEY)
+                .withProperty("kybr.storage.access-key-id", TestSecrets.AWS_ACCESS_KEY_ID)
+                .withProperty("kybr.storage.secret-access-key", TestSecrets.AWS_SECRET_ACCESS_KEY);
+
+        LogRedactor redactor = LogRedaction.from(env);
+
+        assertThat(redactor.redact("a " + TestSecrets.RESEND_API_KEY + " b " + TestSecrets.AWS_ACCESS_KEY_ID + " c "
+                + TestSecrets.AWS_SECRET_ACCESS_KEY)).isEqualTo("a [REDACTED] b [REDACTED] c [REDACTED]");
+        assertThat(redactor.redact("key " + TestSecrets.SCANNER_CLIENT_KEY)).isEqualTo("key [REDACTED]");
+    }
+
+    @Test
     void aMongoUriWithoutCredentialsAddsNoLiteral() {
         MockEnvironment env = new MockEnvironment()
                 .withProperty("spring.mongodb.uri", "mongodb://localhost:27017/kybr?replicaSet=rs0");

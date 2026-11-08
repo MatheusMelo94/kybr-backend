@@ -1,0 +1,10 @@
+[
+  {
+    "Name": "Object-level events on the final and quarantine document buckets only",
+    "FieldSelectors": [
+      { "Field": "eventCategory", "Equals": ["Data"] },
+      { "Field": "resources.type", "Equals": ["AWS::S3::Object"] },
+      { "Field": "resources.ARN", "StartsWith": ["arn:aws:s3:::${BUCKET}/", "arn:aws:s3:::${QUARANTINE_BUCKET}/"] }
+    ]
+  }
+]

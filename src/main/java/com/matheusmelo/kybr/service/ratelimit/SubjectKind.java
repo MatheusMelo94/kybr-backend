@@ -7,7 +7,8 @@ public enum SubjectKind {
     SLUG("slug"),
     CNPJ("cnpj"),
     ACCOUNT("account"),
-    CASE("case");
+    CASE("case"),
+    EMAIL("email");
 
     private final String prefix;
 

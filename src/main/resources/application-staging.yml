@@ -1,6 +1,7 @@
 # Cloud profile (Fly, behind the BFF). No secret has a default: MONGODB_URI, KYBR_BFF_KEY_CURRENT,
 # KYBR_HASH_SECRET, KYBR_IDEMPOTENCY_ENC_KEY, KYBR_PII_ENC_KEY and KYBR_ADMIN_TOKEN must come from
-# Fly secrets. The provider runs as the stub here unless KYBR_CNPJA_MODE says otherwise.
+# Fly secrets. The provider, the scanner, storage and e-mail run as stub, memory and recording here
+# unless KYBR_CNPJA_MODE, KYBR_SCANNER_MODE, KYBR_STORAGE_MODE and KYBR_EMAIL_MODE say otherwise.
 
 logging:
   structured:
@@ -11,7 +12,13 @@ logging:
     org.apache.catalina: INFO
 
 kybr:
+  image:
+    mode: ${KYBR_IMAGE_MODE:in-process-test} # metadata stripped in process, no decode; synthetic photos only
   client-ip:
     platform-header: ${KYBR_CLIENT_IP_PLATFORM_HEADER:Fly-Client-IP}
   admin:
     allow-explicit-slug: true # lets staging mirror the frontend's fixture slugs
+  cors:
+    d6:
+      origins: ${KYBR_CORS_D6_ORIGINS:https://kybr.com.br} # comma-separated
+      origin-patterns: ${KYBR_CORS_D6_ORIGIN_PATTERN:} # at most one, anchored to the frontend's preview scope

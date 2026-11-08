@@ -31,7 +31,8 @@ public final class LogRedaction {
     private static final List<String> DEFAULT_PREFIXES = List.of("cases");
     private static final List<String> SECRET_PROPERTIES = List.of("kybr.bff.current", "kybr.bff.previous",
             "kybr.hashing.secret", "kybr.hashing.previous", "kybr.idempotency.enc-key", "kybr.cnpja.api-key",
-            "kybr.pii.enc-key", "kybr.admin.token", "kybr.admin.token-previous");
+            "kybr.pii.enc-key", "kybr.admin.token", "kybr.admin.token-previous", "kybr.scanner.client-key",
+            "kybr.email.api-key", "kybr.storage.access-key-id", "kybr.storage.secret-access-key");
     /** The password in {@code scheme://user:password@host}: group 1. */
     private static final Pattern URI_CREDENTIALS = Pattern.compile("://[^:@/\\s]*:([^@/\\s]+)@");
 
@@ -60,7 +61,8 @@ public final class LogRedaction {
     /**
      * The configured secret values, masked verbatim wherever they appear in a log line: the BFF
      * keys, the hash secrets, the replay-body and personal-data keysets, the provider API key, the
-     * admin tokens and the MongoDB password (as written in the URI and percent-decoded). The user name is not a secret and stays readable.
+     * admin tokens, the scanner client key, the e-mail provider key, the static storage keys and the
+     * MongoDB password (as written in the URI and percent-decoded). The user name is not a secret and stays readable.
      */
     public static List<String> secretLiterals(Environment environment) {
         List<String> literals = new ArrayList<>();

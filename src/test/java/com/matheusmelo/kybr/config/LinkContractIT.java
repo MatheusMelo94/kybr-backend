@@ -30,8 +30,8 @@ class LinkContractIT extends WebIntegrationTest {
     }
 
     @Test
-    void theContractVersionIs020() {
-        assertThat(docs.getString("info.version")).isEqualTo("0.2.0");
+    void theContractVersionIs040() {
+        assertThat(docs.getString("info.version")).isEqualTo("0.4.0");
     }
 
     @Test

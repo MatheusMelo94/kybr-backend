@@ -93,7 +93,7 @@ public class VerificationStartService {
         return new LinkCase(UUID.randomUUID(), workspace.id(), CaseTokens.hash(token), EstadoCaso.processing, now,
                 cnpj, ResponsavelValidator.normalize(command.responsavel()), command.ref(), command.extId(),
                 workspace.politica(), null, null, null, null, Processamento.pendente(now), null, null,
-                command.idempotencyKey().toLowerCase(Locale.ROOT), null);
+                command.idempotencyKey().toLowerCase(Locale.ROOT), null, null, null, null, null, null);
     }
 
     private AuditEvent auditEvent(Workspace workspace, ClientIp clientIp, LinkCase created) {

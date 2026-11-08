@@ -114,6 +114,14 @@ class ChecksEvaluatorTest {
     }
 
     @Test
+    void anActiveRegistrationWithAnInvalidStateConfirmsNothing() {
+        Evaluation invalidState = evaluator.evaluate(company(SituacaoCadastral.ativa, TODAY.minusYears(10),
+                Regime.SIMPLES, List.of(new InscricaoEstadual(null, true)), List.of(PARTNER)), PARTNER, 180);
+
+        assertThat(invalidState.ieAtivaUf()).isNull();
+    }
+
+    @Test
     void partnerNamesNeverAppearInTheChecks() {
         Evaluation evaluation = evaluator.evaluate(company(SituacaoCadastral.ativa, TODAY.minusYears(10), Regime.OUTRO,
                 List.of(), List.of("Roberto Ficticio Nunes", PARTNER)), "Maria Teste", 180);

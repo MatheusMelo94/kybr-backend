@@ -13,7 +13,7 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 
 /**
  * No request body is ever uncapped, at the acceptance level, on the seller document upload
- * ({@code POST /public/v/{slug}/cases/{token}/documents}, no BFF key, multipart only, 11 MB cap).
+ * ({@code POST /public/v/{slug}/cases/{token}/documents}, no BFF key, multipart only, capped at 10 MiB of files plus multipart overhead).
  * {@code BodySizeLimitFilterIT} proves the statuses; this adds the cross-cutting guarantees on
  * those rejections: the envelope, {@code X-Request-Id}, the security headers, exactly one access
  * line, and the case token in the path never reaching the logs.

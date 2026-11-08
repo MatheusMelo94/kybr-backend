@@ -48,7 +48,7 @@ import org.springframework.context.annotation.Configuration;
 public class OpenApiConfig {
 
     /** The contract version: bump it (SemVer) on every contract change. */
-    public static final String CONTRACT_VERSION = "0.2.0";
+    public static final String CONTRACT_VERSION = "0.4.0";
     public static final List<String> SERVERS = List.of("https://api.kybr.com.br", "https://api-staging.kybr.com.br");
 
     private static final String REQUEST_ID = "X-Request-Id";
@@ -64,7 +64,9 @@ public class OpenApiConfig {
             would ship as `/public/v2/{slug}/...` next to it, never in place.
 
             Every call comes from the link's server with `X-Kybr-BFF-Key`; calls that are rate-limited \
-            or audited also carry `X-Kybr-Client-IP`. Errors use the `ErrorResponse` envelope: branch on \
+            or audited also carry `X-Kybr-Client-IP`. The one exception is the document upload \
+            (`POST /public/v/{slug}/cases/{token}/documents`), which the seller's browser calls directly, \
+            without either header. Errors use the `ErrorResponse` envelope: branch on \
             `code`, never on `message`. Every response carries `X-Request-Id`, and every 429 carries \
             `Retry-After` in seconds. Timestamps are ISO 8601 with an offset. CNPJs are 14 upper-case \
             characters without punctuation, numeric or alphanumeric.""";

@@ -231,6 +231,148 @@ tests:
           - exp_labels: { severity: none, signal: watchdog }
             exp_annotations: { summary: "Always firing: proves the alerting pipeline is alive (routed to the dead-man check only)" }
 
+  # ------------------------------------------------------------ documents, scanner, storage, e-mail, retention
+  - interval: 1m
+    input_series:
+      - series: 'kybr_upload_total{app="kybr-api",resultado="formato"}'
+        values: '0+1x30'
+      - series: 'kybr_upload_total{app="kybr-api",resultado="limitado"}'
+        values: '0+1x30'
+      - series: 'kybr_upload_total{app="kybr-api",resultado="aceito"}'
+        values: '0+50x30'
+      - series: 'kybr_upload_malware_total{app="kybr-api-staging"}'
+        values: '0x17 1x13'
+      - series: 'kybr_scanner_signature_age_hours{app="kybr-api-staging",instance="m1"}'
+        values: '30x30'
+      - series: 'kybr_scanner_signature_age_hours{app="kybr-api",instance="m1"}'
+        values: '50x30'
+      - series: 'kybr_scanner_calls_total{app="kybr-api",resultado="unavailable"}'
+        values: '0+1x30'
+      - series: 'kybr_scanner_calls_total{app="kybr-api",resultado="clean"}'
+        values: '0+100x30'
+      - series: 'kybr_image_reencode_total{app="kybr-api",resultado="timeout"}'
+        values: '0+1x30'
+      - series: 'kybr_image_reencode_total{app="kybr-api",resultado="ok"}'
+        values: '0+100x30'
+      - series: 'kybr_image_reencode_total{app="kybr-api",resultado="unsupported"}'
+        values: '0+100x30'
+      - series: 'kybr_storage_calls_total{app="kybr-api",operacao="put",resultado="erro"}'
+        values: '0x15 1x15'
+      - series: 'kybr_storage_calls_total{app="kybr-api",operacao="put",resultado="ok"}'
+        values: '0+100x30'
+      - series: 'kybr_email_failed_total{app="kybr-api",tipo="contato-alterado",motivo="permanente"}'
+        values: '0x15 1x15'
+      - series: 'kybr_retention_failed_total{app="kybr-api"}'
+        values: '0x15 1x15'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: KybrUploadFormatRefusalsSpike
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: upload-formato, app: kybr-api }
+            exp_annotations: { summary: "Uploads refused as invalid format (kybr-api): 15 in 15 min" }
+      - eval_time: 20m
+        alertname: KybrUploadLimitedSpike
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: upload-limited, app: kybr-api }
+            exp_annotations: { summary: "Uploads refused by rate limits (kybr-api): 15 in 15 min" }
+      - eval_time: 20m
+        alertname: KybrUploadMalwareDetected
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: malware, app: kybr-api-staging }
+            exp_annotations: { summary: "The scanner refused an uploaded file (kybr-api-staging): 1 in 10 min" }
+      - eval_time: 20m
+        alertname: KybrScannerSignaturesAging
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: signature-age, app: kybr-api-staging }
+            exp_annotations: { summary: "Scanner signatures are 30 h old (kybr-api-staging); uploads stop at 48 h" }
+          - exp_labels: { severity: warning, signal: signature-age, app: kybr-api }
+            exp_annotations: { summary: "Scanner signatures are 50 h old (kybr-api); uploads stop at 48 h" }
+      - eval_time: 20m
+        alertname: KybrScannerSignaturesStale
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: signature-age, app: kybr-api }
+            exp_annotations: { summary: "Scanner signatures are 50 h old (kybr-api): uploads are refused" }
+      - eval_time: 20m
+        alertname: KybrScannerUnavailable
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: scanner-unavailable, app: kybr-api }
+            exp_annotations: { summary: "Scanner calls failing (kybr-api): 10 in 10 min; uploads answer 503" }
+      - eval_time: 20m
+        alertname: KybrImageReencodeFailures
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: reencode-failures, app: kybr-api }
+            exp_annotations: { summary: "Photo sanitizer failing or slow (kybr-api): 15 in 15 min" }
+      - eval_time: 20m
+        alertname: KybrStorageErrors
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: storage-errors, app: kybr-api, operacao: put }
+            exp_annotations: { summary: "Document storage put failing (kybr-api): 1 in 10 min" }
+      - eval_time: 20m
+        alertname: KybrEmailFailed
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: email-failed, app: kybr-api, tipo: contato-alterado, motivo: permanente }
+            exp_annotations: { summary: "E-mail contato-alterado failed (permanente, kybr-api)" }
+      - eval_time: 20m
+        alertname: KybrRetentionFailed
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: retention-failed, app: kybr-api }
+            exp_annotations: { summary: "Retention deletion failed (kybr-api): 1 in 1 h" }
+
+  # ------------------------------------------------------------ asynchronous scanning
+  - interval: 1m
+    input_series:
+      - series: 'kybr_scan_wake_seconds_count{app="kybr-api",resultado="timeout"}'
+        values: '0x15 1x15'
+      - series: 'kybr_scan_wake_seconds_count{app="kybr-api",resultado="ok"}'
+        values: '0+1x30'
+      - series: 'kybr_scan_backlog_oldest_age_seconds{app="kybr-api",instance="m1"}'
+        values: '1200x30'
+      - series: 'kybr_scan_backlog_oldest_age_seconds{app="kybr-api-staging",instance="m1"}'
+        values: '4000x30'
+      - series: 'kybr_scan_result_total{app="kybr-api",resultado="recusado_falhou"}'
+        values: '0x15 1x15'
+      - series: 'kybr_scan_result_total{app="kybr-api",resultado="reagendado"}'
+        values: '0+1x30'
+      - series: 'kybr_scan_result_total{app="kybr-api",resultado="aceito"}'
+        values: '0+100x30'
+      - series: 'kybr_scan_stuck{app="kybr-api",instance="m1"}'
+        values: '2x30'
+      - series: 'kybr_scan_stuck{app="kybr-api-staging",instance="m1"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: KybrScanWakeTimeouts
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: scan-wake-timeout, app: kybr-api }
+            exp_annotations: { summary: "The scanner didn't answer the wake-up in time (kybr-api): 1 in 1 h (boot or signature download failing, or Fly couldn't start it)" }
+      - eval_time: 20m
+        alertname: KybrScanBacklogOld
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: scan-backlog, app: kybr-api }
+            exp_annotations: { summary: "Oldest unscanned upload is 20m 0s old (kybr-api)" }
+          - exp_labels: { severity: warning, signal: scan-backlog, app: kybr-api-staging }
+            exp_annotations: { summary: "Oldest unscanned upload is 1h 6m 40s old (kybr-api-staging)" }
+      - eval_time: 20m
+        alertname: KybrScanBacklogVeryOld
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: scan-backlog, app: kybr-api-staging }
+            exp_annotations: { summary: "Oldest unscanned upload is 1h 6m 40s old (kybr-api-staging): sellers are waiting" }
+      - eval_time: 20m
+        alertname: KybrScanRefusedUnverified
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: scan-failed, app: kybr-api }
+            exp_annotations: { summary: "Uploads refused because they couldn't be verified (kybr-api): 1 in 1 h" }
+      - eval_time: 20m
+        alertname: KybrScanRescheduledSpike
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: scan-rescheduled, app: kybr-api }
+            exp_annotations: { summary: "Scans rescheduled (kybr-api): 20 in 1 h" }
+      - eval_time: 20m
+        alertname: KybrScanStuck
+        exp_alerts:
+          - exp_labels: { severity: critical, signal: scan-stuck, app: kybr-api }
+            exp_annotations: { summary: "2 uploads pending for more than 24 h (kybr-api)" }
+
   # ------------------------------------------------------------ 24 h and 1 h windows
   - interval: 1m
     input_series:
@@ -238,6 +380,13 @@ tests:
         values: '0+1x1500'
       - series: 'kybr_link_contact_total{app="kybr-api",resultado="limited"}'
         values: '0+1x1500'
+      - series: 'kybr_email_capped_total{app="kybr-api-staging",tipo="teste-operador"}'
+        values: '0+1x1500'
+      # 3 wake-ups an hour (72 a day) on prod; staging at 1 a day stays quiet.
+      - series: 'kybr_scan_wake_seconds_count{app="kybr-api",resultado="ok"}'
+        values: '0+0.05x1500'
+      - series: 'kybr_scan_wake_seconds_count{app="kybr-api-staging",resultado="ok"}'
+        values: '0+0.000694x1500'
     alert_rule_test:
       - eval_time: 1500m
         alertname: KybrCacheReadsPerSlugHigh
@@ -249,3 +398,13 @@ tests:
         exp_alerts:
           - exp_labels: { severity: warning, signal: contact-limited, app: kybr-api }
             exp_annotations: { summary: "Contact e-mail changes hitting the per-case limit (kybr-api): 60 in 1 h" }
+      - eval_time: 1500m
+        alertname: KybrEmailCappedSpike
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: email-capped, app: kybr-api-staging, tipo: teste-operador }
+            exp_annotations: { summary: "E-mails dropped by the per-address cap (teste-operador, kybr-api-staging): 60 in 1 h" }
+      - eval_time: 1500m
+        alertname: KybrScannerWakeupsHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, signal: scan-wakeups, app: kybr-api }
+            exp_annotations: { summary: "72 scanner wake-ups in 24 h (kybr-api); check the scan org's bill against the always-on price (~US$41/month)" }

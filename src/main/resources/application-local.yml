@@ -12,5 +12,10 @@ springdoc:
     enabled: true
 
 kybr:
+  image:
+    mode: ${KYBR_IMAGE_MODE:in-process-test} # metadata stripped in process, no decode; synthetic photos only
   admin:
     allow-explicit-slug: true
+  cors:
+    d6:
+      origins: [http://localhost:3000] # the frontend's dev server

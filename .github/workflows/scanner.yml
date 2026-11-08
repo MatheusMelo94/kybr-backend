@@ -1,0 +1,77 @@
+# Scanner org checks (deploy/scanner): the shipped ClamAV configuration and custom signatures against a
+# real ClamAV, and a smoke test of the whole scanner image (mTLS, client identity, verdicts, sanitizer,
+# loopback-only listeners). Runs when the scanner or the scan/sanitizer code changes, and weekly
+# (fresh public signatures). Each job downloads the ClamAV databases, so it takes a few minutes.
+name: Scanner
+
+on:
+  push:
+    branches: [main]
+    paths: &scanner_paths
+      - "deploy/scanner/**"
+      - "src/main/java/com/matheusmelo/kybr/service/scan/**"
+      - "src/main/java/com/matheusmelo/kybr/sanitizer/**"
+      - "src/test/java/com/matheusmelo/kybr/service/scan/**"
+      - "scripts/ci/scanner-smoke.sh"
+      - "scripts/documents/make-test-files.py"
+      - ".github/workflows/scanner.yml"
+  pull_request:
+    paths: *scanner_paths
+  schedule:
+    - cron: "41 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scanner-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  signatures:
+    name: Shipped clamd config and signatures vs real ClamAV
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      - name: Real-ClamAV integration test with deploy/scanner/clamav
+        run: |
+          chmod +x mvnw
+          ./mvnw -B -ntp verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dit.test=ClamdScannerClamavIT -Dfailsafe.failIfNoSpecifiedTests=false \
+            -Dkybr.it.clamav=true -Dkybr.it.clamav.config-dir="$GITHUB_WORKSPACE/deploy/scanner/clamav" \
+            -Dkybr.it.clamav.image=clamav/clamav:1.5.4
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: clamav-it-reports
+          path: target/failsafe-reports/
+          retention-days: 7
+
+  image:
+    name: Scanner image smoke test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the scanner image (repo root context, deploy/scanner/Dockerfile.dockerignore)
+        run: docker build -f deploy/scanner/Dockerfile -t kybr-clamav:ci .
+
+      - name: Smoke test (throwaway PKI)
+        run: scripts/ci/scanner-smoke.sh kybr-clamav:ci "$RUNNER_TEMP/scanner-smoke"

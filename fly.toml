@@ -26,6 +26,14 @@ kill_timeout = "30s"
   KYBR_CLIENT_IP_PLATFORM_HEADER = "Fly-Client-IP"
   # Company-data provider: synthetic fixtures on staging; never live without an explicit decision.
   KYBR_CNPJA_MODE = "stub"
+  # Isolated scanner org endpoints. Staging uses them only when KYBR_SCANNER_MODE=clamd and
+  # KYBR_IMAGE_MODE=remote are set as Fly secrets (the documents gate run); otherwise it stays on the
+  # stub scanner and in-process test re-encoding, and these are unused.
+  KYBR_SCANNER_HOST = "kybr-clamav.fly.dev"
+  KYBR_SCANNER_PORT = "3310"
+  KYBR_SANITIZER_HOST = "kybr-clamav.fly.dev"
+  KYBR_SANITIZER_PORT = "3311"
+  KYBR_UPLOAD_TEMP_DIR = "/tmp/kybr-uploads"
 
 # Public edge: 443 only (TLS terminated by Fly, TLS >= 1.2). No port 80, no force_https, no redirect.
 # Deliberately [[services]] rather than [http_service], which would add port 80.

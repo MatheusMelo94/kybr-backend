@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Cases: one per token hash (the read path), claimable work by state and next attempt (the
- * workers' claim), and a workspace's cases per CNPJ over time.
+ * workers' claim), a workspace's cases per CNPJ over time, and cases due for retention.
  */
 @Component
 class LinkCaseIndexes implements IndexDefinitionProvider {
@@ -28,6 +28,8 @@ class LinkCaseIndexes implements IndexDefinitionProvider {
                         .on(LinkCase.PROCESSAMENTO_PROXIMA_TENTATIVA, Sort.Direction.ASC)
                         .named("processamento_claim"),
                 new Index().on(LinkCase.WORKSPACE_ID, Sort.Direction.ASC).on(LinkCase.CNPJ, Sort.Direction.ASC)
-                        .on(LinkCase.CRIADO_EM, Sort.Direction.ASC).named("workspace_cnpj_criado"));
+                        .on(LinkCase.CRIADO_EM, Sort.Direction.ASC).named("workspace_cnpj_criado"),
+                new Index().on(LinkCase.RETENCAO_ATE, Sort.Direction.ASC)
+                        .on(LinkCase.RETENCAO_ESTADO, Sort.Direction.ASC).named("retencao_claim"));
     }
 }
