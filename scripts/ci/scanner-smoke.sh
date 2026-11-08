@@ -110,13 +110,19 @@ check "sanitizer refuses a client without a certificate" refused "$(curl -sS -o 
   >/dev/null 2>&1 && echo accepted || echo refused)"
 
 # 6. Listeners: stunnel outside, the sanitizer on loopback, clamd on no TCP port at all.
-listeners=$(docker exec kybr-scanner-smoke sh -c 'netstat -tln 2>/dev/null' | awk 'NR>2 {print $4}' | sort | tr '\n' ' ')
+# IPv4-mapped IPv6 (::ffff:127.0.0.1) is the same loopback address, so it is normalised first.
+listeners=$(docker exec kybr-scanner-smoke sh -c 'netstat -tln 2>/dev/null' | awk 'NR>2 {sub(/^::ffff:/, "", $4); print $4}' | sort | tr '\n' ' ')
 check "only stunnel listens outside loopback; clamd has no TCP listener" \
   "0.0.0.0:13310 0.0.0.0:13311 127.0.0.1:8090 " "$listeners"
 
 # 7. Process separation: each service under its own user; the sanitizer's user can't reach clamd, the
 # signatures, the configuration or the TLS key.
-owner() { docker exec kybr-scanner-smoke ps -o user,args | awk -v p="$1" '$0 ~ p && $0 !~ /awk/ {print $1; exit}'; }
+# ps truncates long user names (sanitizer -> sanitize), so resolve the owner from the process itself.
+owner() {
+  local pid
+  pid=$(docker exec kybr-scanner-smoke ps -o pid,args | awk -v p="$1" '$0 ~ p && $0 !~ /awk/ {print $1; exit}')
+  [ -n "$pid" ] && docker exec kybr-scanner-smoke stat -c %U "/proc/$pid"
+}
 check "clamd runs as clamav" clamav "$(owner 'clamd --foreground')"
 check "stunnel runs as scanlink" scanlink "$(owner 'stunnel /etc/stunnel')"
 check "the sanitizer runs as sanitizer" sanitizer "$(owner 'SanitizerApplication')"
