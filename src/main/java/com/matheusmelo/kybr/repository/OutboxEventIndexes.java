@@ -12,8 +12,9 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.stereotype.Component;
 
 /**
- * The sender's queue (unprocessed first, oldest first), expiry, and at most one unprocessed event
- * per (case, tipo), which coalesces repeated changes.
+ * The sender's queue (unprocessed first, oldest first), the dispatcher's claim (pending events by
+ * when they're next due), expiry, and at most one unprocessed event per (case, tipo), which
+ * coalesces repeated changes.
  */
 @Component
 class OutboxEventIndexes implements IndexDefinitionProvider {
@@ -28,6 +29,8 @@ class OutboxEventIndexes implements IndexDefinitionProvider {
         return List.of(
                 new Index().on(OutboxEvent.PROCESSADO_EM, Sort.Direction.ASC)
                         .on(OutboxEvent.CRIADO_EM, Sort.Direction.ASC).named("processado_criado"),
+                new Index().on(OutboxEvent.PENDENTE, Sort.Direction.ASC)
+                        .on(OutboxEvent.PROXIMA_TENTATIVA, Sort.Direction.ASC).named("pendente_proxima_tentativa"),
                 new Index().on(OutboxEvent.EXPIRA_EM, Sort.Direction.ASC).expire(Duration.ZERO)
                         .named("expira_em_ttl"),
                 new Index().on(OutboxEvent.CASE_ID, Sort.Direction.ASC).on(OutboxEvent.TIPO, Sort.Direction.ASC)

@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.function.Function;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.stereotype.Component;
@@ -35,8 +36,12 @@ import tools.jackson.databind.node.ObjectNode;
  * {@code founded_days_ago} sets the opening date relative to today in São Paulo, so "recent"
  * scenarios never go stale. {@code delay: worker-read-minus-2s} makes the full check answer two
  * seconds inside the worker's read timeout. A CNPJ without a fixture is not found.
+ *
+ * <p>The bean never exists under {@code prod}, whatever the mode says; the prod guard also refuses
+ * to start in stub mode, so the two checks back each other up.
  */
 @Component
+@Profile("!prod")
 @ConditionalOnProperty(prefix = "kybr.cnpja", name = "mode", havingValue = "stub", matchIfMissing = true)
 public class StubCompanyDataProvider implements CompanyDataProvider {
 

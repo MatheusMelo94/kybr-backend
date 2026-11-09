@@ -164,6 +164,132 @@ groups:
         annotations:
           summary: "An idempotent endpoint returned without declaring completion ({{ $labels.app }})"
 
+  # ---------------------------------------------------------------- seller documents, scanner, storage
+  - name: kybr-documents
+    interval: 1m
+    rules:
+      - alert: KybrUploadFormatRefusalsSpike
+        expr: sum by (app) (increase(kybr_upload_total{app=~"${APP_MATCH}",resultado="formato"}[15m])) > ${T_UPLOAD_FORMATO_15M}
+        labels: { severity: warning, signal: upload-formato }
+        annotations:
+          summary: "Uploads refused as invalid format ({{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 15 min"
+
+      - alert: KybrUploadLimitedSpike
+        expr: sum by (app) (increase(kybr_upload_total{app=~"${APP_MATCH}",resultado="limitado"}[15m])) > ${T_UPLOAD_LIMITADO_15M}
+        labels: { severity: warning, signal: upload-limited }
+        annotations:
+          summary: "Uploads refused by rate limits ({{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 15 min"
+
+      - alert: KybrUploadMalwareDetected
+        expr: sum by (app) (increase(kybr_upload_malware_total{app=~"${APP_MATCH}"}[10m])) > 0
+        labels: { severity: critical, signal: malware }
+        annotations:
+          summary: "The scanner refused an uploaded file ({{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 10 min"
+
+      - alert: KybrScannerSignaturesAging
+        expr: max by (app) (kybr_scanner_signature_age_hours{app=~"${APP_MATCH}"}) > 26
+        labels: { severity: warning, signal: signature-age }
+        annotations:
+          summary: "Scanner signatures are {{ $value | printf \"%.0f\" }} h old ({{ $labels.app }}); uploads stop at 48 h"
+
+      - alert: KybrScannerSignaturesStale
+        expr: max by (app) (kybr_scanner_signature_age_hours{app=~"${APP_MATCH}"}) > 48
+        labels: { severity: critical, signal: signature-age }
+        annotations:
+          summary: "Scanner signatures are {{ $value | printf \"%.0f\" }} h old ({{ $labels.app }}): uploads are refused"
+
+      - alert: KybrScannerUnavailable
+        expr: sum by (app) (increase(kybr_scanner_calls_total{app=~"${APP_MATCH}",resultado=~"unavailable|timeout"}[10m])) > ${T_SCANNER_UNAVAILABLE_10M}
+        labels: { severity: critical, signal: scanner-unavailable }
+        annotations:
+          summary: "Scanner calls failing ({{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 10 min; uploads answer 503"
+
+      - alert: KybrImageReencodeFailures
+        expr: sum by (app) (increase(kybr_image_reencode_total{app=~"${APP_MATCH}",resultado=~"timeout|unavailable"}[15m])) > ${T_REENCODE_FAILURES_15M}
+        labels: { severity: warning, signal: reencode-failures }
+        annotations:
+          summary: "Photo sanitizer failing or slow ({{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 15 min"
+
+      - alert: KybrStorageErrors
+        expr: sum by (app, operacao) (increase(kybr_storage_calls_total{app=~"${APP_MATCH}",resultado="erro"}[10m])) > 0
+        labels: { severity: critical, signal: storage-errors }
+        annotations:
+          summary: "Document storage {{ $labels.operacao }} failing ({{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 10 min"
+
+  # ---------------------------------------------------------------- asynchronous scanning (scale-to-zero scanner)
+  # The scanner lives in another Fly org, so its own logs and metrics aren't visible here. A failed freshclam
+  # at boot shows on the API side: with no databases on the volume the scanner never answers the wake-up
+  # (KybrScanWakeTimeouts); with old ones the session's signature age rises (KybrScannerSignatures*).
+  - name: kybr-scan-async
+    interval: 1m
+    rules:
+      - alert: KybrScanWakeTimeouts
+        expr: sum by (app) (increase(kybr_scan_wake_seconds_count{app=~"${APP_MATCH}",resultado="timeout"}[1h])) > 0
+        labels: { severity: critical, signal: scan-wake-timeout }
+        annotations:
+          summary: "The scanner didn't answer the wake-up in time ({{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 1 h (boot or signature download failing, or Fly couldn't start it)"
+
+      - alert: KybrScannerWakeupsHigh
+        # Input for the always-on / gatekeeper decision: every scan session wakes the scanner, which then
+        # stays up until idle. This counts only the API's own wake-ups; strangers' connections also wake
+        # it but are visible only in the scan org's Fly bill.
+        expr: sum by (app) (increase(kybr_scan_wake_seconds_count{app=~"${APP_MATCH}"}[24h])) > ${T_SCAN_WAKEUPS_24H}
+        labels: { severity: warning, signal: scan-wakeups }
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} scanner wake-ups in 24 h ({{ $labels.app }}); check the scan org's bill against the always-on price (~US$41/month)"
+
+      - alert: KybrScanBacklogOld
+        expr: max by (app) (kybr_scan_backlog_oldest_age_seconds{app=~"${APP_MATCH}"}) > 900
+        labels: { severity: warning, signal: scan-backlog }
+        annotations:
+          summary: "Oldest unscanned upload is {{ $value | humanizeDuration }} old ({{ $labels.app }})"
+
+      - alert: KybrScanBacklogVeryOld
+        expr: max by (app) (kybr_scan_backlog_oldest_age_seconds{app=~"${APP_MATCH}"}) > 3600
+        labels: { severity: critical, signal: scan-backlog }
+        annotations:
+          summary: "Oldest unscanned upload is {{ $value | humanizeDuration }} old ({{ $labels.app }}): sellers are waiting"
+
+      - alert: KybrScanRefusedUnverified
+        expr: sum by (app) (increase(kybr_scan_result_total{app=~"${APP_MATCH}",resultado="recusado_falhou"}[1h])) > 0
+        labels: { severity: critical, signal: scan-failed }
+        annotations:
+          summary: "Uploads refused because they couldn't be verified ({{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 1 h"
+
+      - alert: KybrScanRescheduledSpike
+        expr: sum by (app) (increase(kybr_scan_result_total{app=~"${APP_MATCH}",resultado="reagendado"}[1h])) > ${T_SCAN_RESCHEDULED_1H}
+        labels: { severity: warning, signal: scan-rescheduled }
+        annotations:
+          summary: "Scans rescheduled ({{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 1 h"
+
+      - alert: KybrScanStuck
+        expr: max by (app) (kybr_scan_stuck{app=~"${APP_MATCH}"}) > 0
+        labels: { severity: critical, signal: scan-stuck }
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} uploads pending for more than 24 h ({{ $labels.app }})"
+
+  # ---------------------------------------------------------------- e-mail and retention
+  - name: kybr-email-retention
+    interval: 1m
+    rules:
+      - alert: KybrEmailFailed
+        expr: sum by (app, tipo, motivo) (increase(kybr_email_failed_total{app=~"${APP_MATCH}"}[15m])) > 0
+        labels: { severity: warning, signal: email-failed }
+        annotations:
+          summary: "E-mail {{ $labels.tipo }} failed ({{ $labels.motivo }}, {{ $labels.app }})"
+
+      - alert: KybrEmailCappedSpike
+        expr: sum by (app, tipo) (increase(kybr_email_capped_total{app=~"${APP_MATCH}"}[1h])) > ${T_EMAIL_CAPPED_1H}
+        labels: { severity: warning, signal: email-capped }
+        annotations:
+          summary: "E-mails dropped by the per-address cap ({{ $labels.tipo }}, {{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 1 h"
+
+      - alert: KybrRetentionFailed
+        expr: sum by (app) (increase(kybr_retention_failed_total{app=~"${APP_MATCH}"}[1h])) > 0
+        labels: { severity: critical, signal: retention-failed }
+        annotations:
+          summary: "Retention deletion failed ({{ $labels.app }}): {{ $value | printf \"%.0f\" }} in 1 h"
+
   # ---------------------------------------------------------------- platform health
   - name: kybr-platform
     interval: 1m

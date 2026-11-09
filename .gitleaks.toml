@@ -33,6 +33,20 @@ keywords = ["eyjwcmltyxj5s2v5swqi"]
 [[rules]]
 id = "kybr-env-secret"
 description = "A Kybr secret assigned in env, yml or properties form"
-regex = '''KYBR_(?:BFF_KEY|HASH_SECRET|IDEMPOTENCY_ENC_KEY|PII_ENC_KEY|ADMIN_TOKEN|CNPJA_API_KEY)\w*\s*[=:]\s*["']?[A-Za-z0-9_+/=-]{20,}'''
+regex = '''KYBR_(?:BFF_KEY|HASH_SECRET|IDEMPOTENCY_ENC_KEY|PII_ENC_KEY|ADMIN_TOKEN|CNPJA_API_KEY|RESEND_API_KEY|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\w*\s*[=:]\s*["']?[A-Za-z0-9_+/=-]{20,}'''
 keywords = ["kybr_bff_key", "kybr_hash_secret", "kybr_idempotency_enc_key", "kybr_pii_enc_key", "kybr_admin_token",
-  "kybr_cnpja_api_key"]
+  "kybr_cnpja_api_key", "kybr_resend_api_key", "kybr_aws_access_key_id", "kybr_aws_secret_access_key"]
+
+[[rules]]
+id = "resend-api-key"
+description = "E-mail provider (Resend) API key, wherever it appears"
+regex = '''\bre_[A-Za-z0-9_]{20,}\b'''
+entropy = 3.5
+keywords = ["re_"]
+
+[[rules]]
+id = "kybr-scanner-pem"
+description = "Scanner link TLS material (API client key/cert/CA, scanner server key/cert/CA) assigned in env, yml or properties form"
+regex = '''(?:KYBR_SCANNER_(?:CLIENT_KEY|CLIENT_CERT|CA)|SCAN_TLS_(?:KEY|CERT|CA))\s*[=:]\s*["'|>-]*\s*-----BEGIN [A-Z ]+-----'''
+keywords = ["kybr_scanner_client_key", "kybr_scanner_client_cert", "kybr_scanner_ca", "scan_tls_key", "scan_tls_cert",
+  "scan_tls_ca"]

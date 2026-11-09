@@ -151,13 +151,14 @@ class CrossCuttingAcceptanceIT extends LinkAcceptanceTest {
     }
 
     @Test
-    @DisplayName("the committed contract declares the five link operations, version 0.2.0 and their codes")
+    @DisplayName("the committed contract declares the link operations, version 0.4.0 and their codes")
     void theCommittedContract() throws IOException {
         String yaml = Files.readString(Path.of("docs", "openapi.yaml"));
 
-        assertThat(yaml).contains("version: 0.2.0");
+        assertThat(yaml).contains("version: 0.4.0");
         for (String path : List.of("/public/v/{slug}:", "/public/v/{slug}/lookup:", "/public/v/{slug}/verify:",
-                "/public/v/{slug}/cases/{token}:", "/public/v/{slug}/cases/{token}/contact:")) {
+                "/public/v/{slug}/cases/{token}:", "/public/v/{slug}/cases/{token}/contact:",
+                "/public/v/{slug}/cases/{token}/documents:")) {
             assertThat(yaml).contains(path);
         }
         for (String code : List.of("LINK_NAO_ENCONTRADO", "EMPRESA_NAO_ENCONTRADA", "CNPJ_INVALIDO",

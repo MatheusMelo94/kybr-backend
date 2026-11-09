@@ -8,6 +8,9 @@ import com.matheusmelo.kybr.config.KybrProperties.Route;
 import com.matheusmelo.kybr.config.KybrProperties.RouteLimit;
 import com.matheusmelo.kybr.support.ProfileBoot;
 import java.time.Duration;
+import java.time.Period;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -24,6 +27,8 @@ import org.springframework.util.unit.DataSize;
 class ProfileConfigurationTest {
 
     private static final String DOCUMENT_UPLOAD = "/public/v/{slug}/cases/{token}/documents";
+    /** 10 MiB of files plus 256 KiB of multipart overhead. */
+    private static final long DOCUMENT_BODY_CAP = 10_747_904;
 
     @ParameterizedTest
     @ValueSource(strings = {"local", "docker", "staging", "prod", "test"})
@@ -42,7 +47,6 @@ class ProfileConfigurationTest {
             assertThat(env.getProperty("server.error.include-exception")).isEqualTo("false");
             assertThat(env.getProperty("server.tomcat.accesslog.enabled")).isEqualTo("false");
             assertThat(env.getProperty("spring.web.resources.add-mappings")).isEqualTo("false");
-            assertThat(env.getProperty("spring.servlet.multipart.enabled")).as("multipart is off").isEqualTo("false");
             assertThat(env.getProperty("spring.mvc.log-request-details")).isEqualTo("false");
             assertThat(env.getProperty("spring.data.mongodb.auto-index-creation")).isEqualTo("false");
             assertThat(env.getProperty("spring.threads.virtual.enabled")).isEqualTo("true");
@@ -51,6 +55,161 @@ class ProfileConfigurationTest {
                     .bind("server.servlet.session.tracking-modes", Bindable.setOf(String.class));
             assertThat(trackingModes.isBound()).as("tracking modes explicitly set").isTrue();
             assertThat(trackingModes.get()).as("no session tracking at all").isEmpty();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"local", "docker", "staging", "prod", "test"})
+    void everyProfileParsesMultipartLazilyToDiskWithinTheDocumentBodyCap(String profile) {
+        try (ConfigurableApplicationContext context = start(profile)) {
+            Environment env = context.getEnvironment();
+            Binder binder = Binder.get(env);
+            KybrProperties properties = context.getBean(KybrProperties.class);
+
+            assertThat(env.getProperty("spring.servlet.multipart.enabled")).isEqualTo("true");
+            assertThat(env.getProperty("spring.servlet.multipart.resolve-lazily")).isEqualTo("true");
+            assertThat(binder.bind("spring.servlet.multipart.file-size-threshold", DataSize.class).get())
+                    .as("every part goes to disk").isEqualTo(DataSize.ofBytes(0));
+            assertThat(binder.bind("spring.servlet.multipart.max-file-size", DataSize.class).get())
+                    .isEqualTo(DataSize.ofBytes(10_485_760));
+            assertThat(binder.bind("spring.servlet.multipart.max-request-size", DataSize.class).get())
+                    .isEqualTo(DataSize.ofBytes(DOCUMENT_BODY_CAP));
+            assertThat(env.getProperty("spring.servlet.multipart.location"))
+                    .isEqualTo(properties.upload().tempDir().toString());
+            assertThat(properties.upload().tempDir().isAbsolute()).isTrue();
+            assertThat(env.getProperty("server.tomcat.max-part-count")).isEqualTo("32");
+            assertThat(binder.bind("server.tomcat.max-part-header-size", DataSize.class).get())
+                    .isEqualTo(DataSize.ofKilobytes(8));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"local", "docker", "staging", "prod", "test"})
+    void everyProfileCarriesTheDocumentAndEmailDefaults(String profile) {
+        try (ConfigurableApplicationContext context = start(profile)) {
+            KybrProperties properties = context.getBean(KybrProperties.class);
+
+            KybrProperties.Upload upload = properties.upload();
+            assertThat(upload.maxBytesPerTipo()).isEqualTo(DataSize.ofBytes(10_485_760));
+            assertThat(upload.maxFilesPerCase()).isEqualTo(30);
+            assertThat(upload.concurrency()).isEqualTo(2);
+            assertThat(upload.reencodeConcurrency()).isEqualTo(2);
+            assertThat(upload.limits().ip()).isEqualTo(new LimitWindow(120, Duration.ofMinutes(10)));
+            assertThat(upload.limits().ipUnknown()).isEqualTo(new LimitWindow(300, Duration.ofMinutes(10)));
+            assertThat(upload.limits().perCase()).isEqualTo(new LimitWindow(60, Duration.ofDays(1)));
+
+            assertThat(properties.image().mode()).as("photos are decoded in the isolated sanitizer in prod only")
+                    .isEqualTo("prod".equals(profile) ? KybrProperties.Image.Mode.REMOTE
+                            : KybrProperties.Image.Mode.IN_PROCESS_TEST);
+            assertThat(properties.image().maxPixels()).isEqualTo(50_000_000L);
+            assertThat(properties.image().maxSide()).isEqualTo(12_000);
+            assertThat(properties.image().targetLongEdge()).isEqualTo(4_000);
+            assertThat(properties.sanitizer().timeout()).isEqualTo(Duration.ofSeconds(20));
+            assertThat(properties.sanitizer().maxResponse()).isEqualTo(DataSize.ofMegabytes(12));
+
+            KybrProperties.Scanner scanner = properties.scanner();
+            assertThat(scanner.port()).isEqualTo(3310);
+            assertThat(scanner.connectTimeout()).isEqualTo(Duration.ofSeconds(3));
+            assertThat(scanner.readTimeout()).isEqualTo(Duration.ofSeconds(20));
+            assertThat(scanner.maxSignatureAge()).isEqualTo(Duration.ofHours(48));
+
+            KybrProperties.Scan scan = properties.scan();
+            assertThat(scan.workers()).isEqualTo(2);
+            assertThat(scan.pollInterval()).isEqualTo(Duration.ofSeconds(10));
+            assertThat(scan.wakeTimeout()).isEqualTo(Duration.ofSeconds(120));
+            assertThat(scan.wakeInterval()).isEqualTo(Duration.ofSeconds(5));
+            assertThat(scan.lease()).isEqualTo(Duration.ofMinutes(5));
+            assertThat(scan.maxAttempts()).isEqualTo(6);
+            assertThat(scan.backoff()).containsExactly(Duration.ofMinutes(1), Duration.ofMinutes(5),
+                    Duration.ofMinutes(15), Duration.ofHours(1), Duration.ofHours(3));
+            assertThat(scan.stuckAfter()).isEqualTo(Duration.ofHours(24));
+
+            assertThat(properties.storage().region()).isEqualTo("sa-east-1");
+            assertThat(properties.storage().endpoint()).isNull();
+
+            KybrProperties.Email email = properties.email();
+            assertThat(email.from()).isEqualTo("Kybr <nao-responda@kybr.com.br>");
+            assertThat(email.baseUrl().toString()).isEqualTo("https://api.resend.com");
+            assertThat(email.dnsVerified()).as("no real e-mail before the DNS records exist").isFalse();
+            if ("test".equals(profile)) {
+                assertThat(email.testRecipients()).as("one synthetic address for the operator test e-mail")
+                        .containsExactly("operador.teste@example.test");
+            } else {
+                assertThat(email.testRecipients()).isEmpty();
+            }
+            assertThat(email.events().contatoAlterado().enabled()).as("off until its copy exists").isFalse();
+            assertThat(email.caps()).isEqualTo(new KybrProperties.Email.Caps(3, 10));
+            assertThat(email.dispatcher().interval()).isEqualTo(Duration.ofSeconds(10));
+            assertThat(email.dispatcher().lease()).isEqualTo(Duration.ofSeconds(60));
+            assertThat(email.dispatcher().backoff())
+                    .containsExactly(Duration.ofMinutes(1), Duration.ofMinutes(10), Duration.ofHours(1));
+
+            KybrProperties.Retention retention = properties.retention();
+            assertThat(retention.backstop()).isEqualTo(Period.ofMonths(12));
+            assertThat(retention.interval()).isEqualTo(Duration.ofHours(1));
+            assertThat(retention.backstopInterval()).isEqualTo(Duration.ofDays(1));
+            assertThat(retention.orphanInterval()).isEqualTo(Duration.ofDays(7));
+            assertThat(retention.orphanMinAge()).isEqualTo(Duration.ofHours(24));
+
+            boolean test = "test".equals(profile);
+            assertThat(email.dispatcher().enabled()).as("scheduled jobs are off only in tests").isEqualTo(!test);
+            assertThat(retention.enabled()).as("scheduled jobs are off only in tests").isEqualTo(!test);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"local", "docker", "staging", "test"})
+    void nonProdProfilesUseTheStubScannerMemoryStorageAndTheRecordingSender(String profile) {
+        try (ConfigurableApplicationContext context = start(profile)) {
+            KybrProperties properties = context.getBean(KybrProperties.class);
+
+            assertThat(properties.scanner().mode()).isEqualTo(KybrProperties.Scanner.Mode.STUB);
+            assertThat(properties.storage().mode()).isEqualTo(KybrProperties.Storage.Mode.MEMORY);
+            assertThat(properties.email().mode()).isEqualTo(KybrProperties.Email.Mode.RECORDING);
+        }
+    }
+
+    @Test
+    void prodUsesTheRealScannerS3AndResendWithOneExactOrigin() {
+        try (ConfigurableApplicationContext context = start("prod")) {
+            KybrProperties properties = context.getBean(KybrProperties.class);
+
+            assertThat(properties.scanner().mode()).isEqualTo(KybrProperties.Scanner.Mode.CLAMD);
+            assertThat(properties.storage().mode()).isEqualTo(KybrProperties.Storage.Mode.S3);
+            assertThat(properties.email().mode()).isEqualTo(KybrProperties.Email.Mode.RESEND);
+            assertThat(properties.cors().d6().origins()).containsExactly("https://kybr.com.br");
+            assertThat(properties.cors().d6().originPatterns()).isEmpty();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"local", "docker"})
+    void devProfilesAllowTheLocalFrontendOrigin(String profile) {
+        try (ConfigurableApplicationContext context = start(profile)) {
+            assertThat(context.getBean(KybrProperties.class).cors().d6().origins())
+                    .containsExactly("http://localhost:3000");
+        }
+    }
+
+    @Test
+    void stagingTakesItsOriginsAndOnePreviewPatternFromTheEnvironment() {
+        List<String> env = new ArrayList<>(ProfileBoot.validCloudEnv());
+        env.add("--KYBR_CORS_D6_ORIGINS=https://kybr.com.br,https://staging.kybr.com.br");
+        env.add("--KYBR_CORS_D6_ORIGIN_PATTERN=^https://kybr-web-[a-z0-9-]+-kybr\\.vercel\\.app$");
+
+        try (ConfigurableApplicationContext context = ProfileBoot.start("staging", env.toArray(String[]::new))) {
+            KybrProperties.D6Cors cors = context.getBean(KybrProperties.class).cors().d6();
+            assertThat(cors.origins()).containsExactly("https://kybr.com.br", "https://staging.kybr.com.br");
+            assertThat(cors.originPatterns()).containsExactly("^https://kybr-web-[a-z0-9-]+-kybr\\.vercel\\.app$");
+        }
+    }
+
+    @Test
+    void stagingWithoutCorsVariablesAllowsOnlyTheProductOrigin() {
+        try (ConfigurableApplicationContext context = start("staging")) {
+            KybrProperties.D6Cors cors = context.getBean(KybrProperties.class).cors().d6();
+            assertThat(cors.origins()).containsExactly("https://kybr.com.br");
+            assertThat(cors.originPatterns()).isEmpty();
         }
     }
 
@@ -131,7 +290,7 @@ class ProfileConfigurationTest {
             assertThat(properties.limits().defaultMaxBody()).isEqualTo(DataSize.ofBytes(1024 * 1024));
             assertThat(properties.limits().routes()).isEmpty();
             assertThat(properties.limits().multipart())
-                    .containsExactly(new RouteLimit(HttpMethod.POST, DOCUMENT_UPLOAD, DataSize.ofMegabytes(11)));
+                    .containsExactly(new RouteLimit(HttpMethod.POST, DOCUMENT_UPLOAD, DataSize.ofBytes(DOCUMENT_BODY_CAP)));
             assertThat(properties.logging().tokenPrefixes()).containsExactly("cases");
         }
     }

@@ -31,6 +31,20 @@ public final class TestSecrets {
     public static final String ADMIN_TOKEN_PREVIOUS = randomKey();
     /** A synthetic provider API key; never a real one. */
     public static final String CNPJA_API_KEY = randomKey();
+    /** A synthetic e-mail provider key in the provider's shape ({@code re_…}); never a real one. */
+    public static final String RESEND_API_KEY = "re_" + randomAlphanumeric(8) + "_" + randomAlphanumeric(24);
+    /**
+     * PEM-armoured random bytes in the scanner's TLS variable formats: the right shape for startup
+     * validation, never a usable certificate or key.
+     */
+    public static final String SCANNER_CLIENT_CERT = pem("CERTIFICATE");
+    public static final String SCANNER_CLIENT_KEY = pem("PRIVATE KEY");
+    public static final String SCANNER_CA = pem("CERTIFICATE");
+    /** A SHA-256 pin of random bytes, base64 (the {@code kybr.scanner.spki-sha256} format). */
+    public static final String SCANNER_SPKI_SHA256 = Base64.getEncoder().encodeToString(randomBytes(32));
+    /** Synthetic static storage credentials in the cloud provider's shapes; never real ones. */
+    public static final String AWS_ACCESS_KEY_ID = "AKIA" + randomUpperAlphanumeric(16);
+    public static final String AWS_SECRET_ACCESS_KEY = randomAlphanumeric(40);
 
     private TestSecrets() {
     }
@@ -43,9 +57,34 @@ public final class TestSecrets {
     }
 
     private static String randomKey() {
-        byte[] bytes = new byte[32];
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes(32));
+    }
+
+    private static byte[] randomBytes(int length) {
+        byte[] bytes = new byte[length];
         RANDOM.nextBytes(bytes);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        return bytes;
+    }
+
+    private static String randomAlphanumeric(int length) {
+        return randomFrom("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", length);
+    }
+
+    private static String randomUpperAlphanumeric(int length) {
+        return randomFrom("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", length);
+    }
+
+    private static String randomFrom(String alphabet, int length) {
+        StringBuilder value = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            value.append(alphabet.charAt(RANDOM.nextInt(alphabet.length())));
+        }
+        return value.toString();
+    }
+
+    private static String pem(String label) {
+        String body = Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(randomBytes(256));
+        return "-----BEGIN " + label + "-----\n" + body + "\n-----END " + label + "-----\n";
     }
 
     @SuppressWarnings("deprecation") // the generate/serialize pair Tinkey's own tooling mirrors

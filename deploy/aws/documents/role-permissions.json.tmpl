@@ -1,0 +1,53 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "FinalBucketWriteAndDeleteNoRead",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::${BUCKET}/*"
+    },
+    {
+      "Sid": "FinalBucketListForExistenceAndOrphanChecks",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::${BUCKET}"
+    },
+    {
+      "Sid": "FinalBucketEncryptThroughS3Only",
+      "Effect": "Allow",
+      "Action": "kms:GenerateDataKey",
+      "Resource": "${KMS_KEY_ARN}",
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": "s3.sa-east-1.amazonaws.com",
+          "kms:EncryptionContext:aws:s3:arn": "arn:aws:s3:::${BUCKET}"
+        }
+      }
+    },
+    {
+      "Sid": "QuarantineWriteReadDelete",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::${QUARANTINE_BUCKET}/*"
+    },
+    {
+      "Sid": "QuarantineListForOrphanChecks",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::${QUARANTINE_BUCKET}"
+    },
+    {
+      "Sid": "QuarantineEncryptAndDecryptThroughS3Only",
+      "Effect": "Allow",
+      "Action": ["kms:GenerateDataKey", "kms:Decrypt"],
+      "Resource": "${QUARANTINE_KMS_KEY_ARN}",
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": "s3.sa-east-1.amazonaws.com",
+          "kms:EncryptionContext:aws:s3:arn": "arn:aws:s3:::${QUARANTINE_BUCKET}"
+        }
+      }
+    }
+  ]
+}

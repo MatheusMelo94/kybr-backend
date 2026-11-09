@@ -1,0 +1,9 @@
+# Build context for the scanner image (repository root): the Maven sources for the sanitizer jar and
+# the scanner's own configuration. Nothing else (docs, .env files, git metadata, other deploy configs).
+*
+!pom.xml
+!mvnw
+!.mvn/
+!src/
+src/test/
+!deploy/scanner/

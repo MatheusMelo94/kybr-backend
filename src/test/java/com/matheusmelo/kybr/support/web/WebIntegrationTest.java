@@ -24,6 +24,14 @@ import org.springframework.context.annotation.Import;
     "kybr.limits.routes[0].method=POST",
     "kybr.limits.routes[0].pattern=/test/web/large",
     "kybr.limits.routes[0].max-body=3MB",
+    // The document upload route as configured, plus a test-only multipart route with the same cap
+    // (a list from here replaces the yml list, so the first entry restates it).
+    "kybr.limits.multipart[0].method=POST",
+    "kybr.limits.multipart[0].pattern=/public/v/{slug}/cases/{token}/documents",
+    "kybr.limits.multipart[0].max-body=${spring.servlet.multipart.max-request-size}",
+    "kybr.limits.multipart[1].method=POST",
+    "kybr.limits.multipart[1].pattern=/test/upload/parts",
+    "kybr.limits.multipart[1].max-body=${spring.servlet.multipart.max-request-size}",
     // The production exposure plus a test-only endpoint that no security rule names.
     "management.endpoints.web.exposure.include=health,prometheus,admin," + ManagementProbeEndpoint.ID
 })

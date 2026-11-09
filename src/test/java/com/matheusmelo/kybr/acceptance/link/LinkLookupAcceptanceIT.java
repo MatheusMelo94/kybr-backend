@@ -16,6 +16,7 @@ import static org.springframework.data.mongodb.core.query.Criteria.where;
 import static org.springframework.data.mongodb.core.query.Query.query;
 
 import ch.qos.logback.classic.spi.ILoggingEvent;
+import com.matheusmelo.kybr.model.RateLimitCounter;
 import com.matheusmelo.kybr.model.link.AuditEvent;
 import com.matheusmelo.kybr.model.link.CompanyCacheEntry;
 import com.matheusmelo.kybr.model.link.CreditLedger;
@@ -59,6 +60,15 @@ class LinkLookupAcceptanceIT extends LinkAcceptanceTest {
 
     private void forget(String cnpj) {
         mongo.remove(query(where("_id").is(cnpj)), CompanyCacheEntry.COLLECTION);
+    }
+
+    /**
+     * Clears every per-client lookup counter. The daily window is shared by the whole run (and by
+     * earlier runs on the same day), so a random client IP that another lookup already used today
+     * would start a count above zero.
+     */
+    private void forgetClientLookupCounters() {
+        mongo.remove(query(where("_id").regex("^link\\.lookup\\.ip(-daily)?:")), RateLimitCounter.COLLECTION);
     }
 
     private long ledgerD2() {
@@ -275,6 +285,7 @@ class LinkLookupAcceptanceIT extends LinkAcceptanceTest {
         lookup(workspace.slug(), APPROVED, newIp());
         Instant minute = Instant.now().truncatedTo(ChronoUnit.DAYS).plus(Duration.ofHours(12));
         String ip = newIp();
+        forgetClientLookupCounters();
 
         for (int i = 0; i < 30; i++) {
             if (i % 5 == 0) {

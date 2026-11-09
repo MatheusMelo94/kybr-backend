@@ -4,8 +4,8 @@ info:
   description: |-
     The seller link lives under the unversioned base path `/public/v/{slug}`. A breaking change would ship as `/public/v2/{slug}/...` next to it, never in place.
 
-    Every call comes from the link's server with `X-Kybr-BFF-Key`; calls that are rate-limited or audited also carry `X-Kybr-Client-IP`. Errors use the `ErrorResponse` envelope: branch on `code`, never on `message`. Every response carries `X-Request-Id`, and every 429 carries `Retry-After` in seconds. Timestamps are ISO 8601 with an offset. CNPJs are 14 upper-case characters without punctuation, numeric or alphanumeric.
-  version: 0.2.0
+    Every call comes from the link's server with `X-Kybr-BFF-Key`; calls that are rate-limited or audited also carry `X-Kybr-Client-IP`. The one exception is the document upload (`POST /public/v/{slug}/cases/{token}/documents`), which the seller's browser calls directly, without either header. Errors use the `ErrorResponse` envelope: branch on `code`, never on `message`. Every response carries `X-Request-Id`, and every 429 carries `Retry-After` in seconds. Timestamps are ISO 8601 with an offset. CNPJs are 14 upper-case characters without punctuation, numeric or alphanumeric.
+  version: 0.4.0
 servers:
 - url: https://api.kybr.com.br
 - url: https://api-staging.kybr.com.br
@@ -14,6 +14,8 @@ tags:
   description: "The public seller link: link info, company lookup, verification start,\
     \ case read and the seller's contact e-mail. Called server to server by the link's\
     \ frontend."
+- name: Seller documents
+  description: "The seller's document upload, called from the browser."
 paths:
   /public/v/{slug}/cases/{token}/contact:
     put:
@@ -442,6 +444,224 @@ paths:
               schema:
                 type: integer
                 minimum: 1
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                INDISPONIVEL:
+                  value:
+                    code: INDISPONIVEL
+                    message: Service unavailable.
+        default:
+          description: Error envelope
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /public/v/{slug}/cases/{token}/documents:
+    post:
+      tags:
+      - Seller documents
+      summary: Upload documents
+      description: |-
+        Called from the seller's browser, not the link's server: no `X-Kybr-BFF-Key`, no `X-Kybr-Client-IP` and no credentials (send it with `credentials: "omit"`). The case token in the path is the only capability. CORS is answered for the product's origin (`https://kybr.com.br`; staging also allows its configured preview origins), exposing `Retry-After` and `X-Request-Id`, never with credentials. `Origin` is not a control: a request from any other origin, or with none, is processed the same way, and only the browser is kept from reading the answer.
+
+        The body is `multipart/form-data`: one `tipo` and one or more `arquivos`. Files are typed by their first bytes only (`%PDF-`, `FF D8 FF`, the PNG signature); the declared content type and the file name are ignored, and the file name is never stored or echoed. A request sends exactly one PDF, or one or more JPEG/PNG photos (pages of one document). A PDF can't be added to a type that already has files, and photos can't be added to a type that holds a PDF. A type holds at most 10,485,760 bytes of files as sent, across calls, and a case at most 30 files across types. A file already received for the type and not refused (the same bytes) is ignored, so a retry after a lost answer adds nothing and answers the type's current state; files still being checked count toward both limits. A file identical to one refused as not allowed is refused at once (415).
+
+        The answer is 202: files are received into a private quarantine and checked in the background. Every file is scanned; photos are then re-encoded without metadata (EXIF and GPS included) and downscaled to a 4,000 px long edge. PDFs are stored as sent. The case read (D4) shows each document item's `situacao_envio` (`verificando`, then `aceito` or `recusado` with `motivo_recusa`: `CONTEUDO_NAO_PERMITIDO`, `ARQUIVO_INVALIDO` or `VERIFICACAO_FALHOU`); poll it while any item is `verificando`. CMYK, YCCK, 12-bit and arithmetic-coded JPEGs, and photos over 50 megapixels or 12,000 px a side, are refused at once (415): send these as PDF.
+
+        Checks run in this order: client limits, link, token, decided case, capacity, case limit, then the body. A refused request's body is never parsed.
+      operationId: upload
+      parameters:
+      - name: slug
+        in: path
+        description: "The link's slug: 1 to 64 characters of `[a-z0-9-]`, starting\
+          \ and ending with a letter or digit. Anything else is 404 `LINK_NAO_ENCONTRADO`."
+        required: true
+        schema:
+          type: string
+          pattern: "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+      - name: token
+        in: path
+        description: "The case token returned when the verification started. Anything\
+          \ that doesn't match `^[A-Za-z0-9_-]{22,64}$` is 404 `CASO_NAO_ENCONTRADO`."
+        required: true
+        schema:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{22,64}$"
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/UploadForm"
+        required: true
+      responses:
+        "202":
+          description: "The files were received (now or by an earlier call) and are\
+            \ being checked: the type, how many of its files count, and `situacao_envio`.\
+            \ Poll the case read (D4) until the type's item is no longer `verificando`."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResponse"
+        "400":
+          description: "- `REQUISICAO_INVALIDA`: a path that isn't normalised."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                REQUISICAO_INVALIDA:
+                  value:
+                    code: REQUISICAO_INVALIDA
+                    message: Malformed request.
+        "404":
+          description: |-
+            - `LINK_NAO_ENCONTRADO`: the slug is unknown or malformed, the link isn't set up yet, or it is disabled. Decided from the slug, before the token or the body is read.
+            - `CASO_NAO_ENCONTRADO`: the token is unknown, belongs to another link, or no longer opens the case (its documents were deleted); the same response either way.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                LINK_NAO_ENCONTRADO:
+                  value:
+                    code: LINK_NAO_ENCONTRADO
+                    message: Link not found.
+                CASO_NAO_ENCONTRADO:
+                  value:
+                    code: CASO_NAO_ENCONTRADO
+                    message: Case not found.
+        "406":
+          description: "- `FORMATO_NAO_ACEITO`: `Accept` excludes `application/json`\
+            \ (the body is still the JSON envelope)."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                FORMATO_NAO_ACEITO:
+                  value:
+                    code: FORMATO_NAO_ACEITO
+                    message: Response format not acceptable.
+        "409":
+          description: "- `CASO_DECIDIDO`: the case was approved or blocked; it takes\
+            \ no more documents."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                CASO_DECIDIDO:
+                  value:
+                    code: CASO_DECIDIDO
+                    message: Case already decided.
+        "413":
+          description: |-
+            - `ARQUIVO_GRANDE`: the type would hold more than 10,485,760 bytes of files as sent, across calls.
+            - `LIMITE_ARQUIVOS`: the case would hold more than 30 files.
+            - `REQUISICAO_GRANDE`: the body is over 10,747,904 bytes (10 MiB of files plus 256 KiB of multipart overhead), has more than 32 parts, a part header over 8 KiB, or a file over 10 MiB.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                ARQUIVO_GRANDE:
+                  value:
+                    code: ARQUIVO_GRANDE
+                    message: File too large.
+                LIMITE_ARQUIVOS:
+                  value:
+                    code: LIMITE_ARQUIVOS
+                    message: Too many files.
+                REQUISICAO_GRANDE:
+                  value:
+                    code: REQUISICAO_GRANDE
+                    message: Request too large.
+        "415":
+          description: |-
+            - `FORMATO_INVALIDO`: `tipo` is missing, unknown or not asked for on this case; no file; a file that isn't a PDF, JPEG or PNG by its first bytes; more than one PDF, or a PDF with photos; a PDF added to a type that has files, or photos added to a type that holds a PDF; a photo that can't be processed (see above); or a file identical to one refused as not allowed.
+            - `MIDIA_NAO_SUPORTADA`: the body isn't `multipart/form-data`.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                FORMATO_INVALIDO:
+                  value:
+                    code: FORMATO_INVALIDO
+                    message: File format not accepted.
+                MIDIA_NAO_SUPORTADA:
+                  value:
+                    code: MIDIA_NAO_SUPORTADA
+                    message: Unsupported media type.
+        "429":
+          description: "- `LIMITE_TENTATIVAS`: too many uploads from this address\
+            \ (120 per 10 minutes) or for this case (60 per day)."
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying (digits only).
+              schema:
+                type: integer
+                format: int32
+                minimum: 1
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                LIMITE_TENTATIVAS:
+                  value:
+                    code: LIMITE_TENTATIVAS
+                    message: Too many attempts.
+        "500":
+          description: "- `ERRO_INTERNO`: an unexpected error. No detail is given."
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                ERRO_INTERNO:
+                  value:
+                    code: ERRO_INTERNO
+                    message: Internal error.
+        "503":
+          description: "- `INDISPONIVEL`: storage is unavailable or this server is\
+            \ busy; nothing was kept. Send the same files again after `Retry-After`\
+            \ seconds."
+          headers:
             X-Request-Id:
               $ref: "#/components/headers/X-Request-Id"
           content:
@@ -973,6 +1193,59 @@ components:
           pattern: "^[A-Za-z0-9_-]{22,64}$"
       required:
       - token
+    UploadForm:
+      description: One `tipo` and one or more `arquivos` (the field repeated once
+        per file).
+      properties:
+        tipo:
+          type: string
+          enum:
+          - CONTRATO_SOCIAL_OU_CCMEI
+          - PROCURACAO
+          - COMPROVANTE_ENDERECO
+          - CARTAO_CNPJ
+          - RESPONSAVEL
+        arquivos:
+          type: array
+          description: "One PDF, or one or more JPEG or PNG photos. Typed by their\
+            \ first bytes; the file name and the part's content type are ignored."
+          items:
+            type: string
+            format: binary
+          maxItems: 30
+          minItems: 1
+      required:
+      - arquivos
+      - tipo
+    UploadResponse:
+      properties:
+        tipo:
+          type: string
+          enum:
+          - CONTRATO_SOCIAL_OU_CCMEI
+          - PROCURACAO
+          - COMPROVANTE_ENDERECO
+          - CARTAO_CNPJ
+          - RESPONSAVEL
+        documentos_enviados:
+          type: integer
+          format: int32
+          description: "The type's files accepted or still being checked, across calls;\
+            \ a retried file isn't counted twice, and refused files aren't counted."
+          minimum: 0
+        situacao_envio:
+          type: string
+          description: "`verificando` once new files were received: they are checked\
+            \ in the background, and the case read (D4) shows the outcome. A retry\
+            \ that adds nothing answers the type's current state."
+          enum:
+          - verificando
+          - aceito
+          - recusado
+      required:
+      - documentos_enviados
+      - situacao_envio
+      - tipo
     ContatoVendedor:
       description: How the seller reaches the workspace.
       properties:
@@ -1102,8 +1375,44 @@ components:
         documentos_enviados:
           type: integer
           format: int32
-          description: Present on document items.
+          description: "Present on document items: the type's files accepted or still\
+            \ being checked (refused files aren't counted)."
           minimum: 0
+        formato_envio:
+          type: string
+          description: "On document items, once a file that still counts was sent\
+            \ for the type: how the type is being sent. `pdf` takes no more files;\
+            \ `fotos` takes more pages."
+          enum:
+          - pdf
+          - fotos
+        situacao_envio:
+          type: string
+          description: "On document items, once a file was sent for the type: `verificando`\
+            \ while any of its files is being checked (poll this read until it changes),\
+            \ then `recusado` when its latest upload had a refused file, otherwise\
+            \ `aceito`."
+          enum:
+          - verificando
+          - aceito
+          - recusado
+        documentos_recusados:
+          type: integer
+          format: int32
+          description: "On document items, once a file was sent for the type: how\
+            \ many of its files were refused so far, across uploads (it stays after\
+            \ a later accepted upload)."
+          minimum: 0
+        motivo_recusa:
+          type: string
+          description: "With `situacao_envio=recusado`, about the latest upload: `CONTEUDO_NAO_PERMITIDO`\
+            \ (the file isn't accepted; send a different one), `ARQUIVO_INVALIDO`\
+            \ (it is damaged or unreadable; send a new copy or photo) or `VERIFICACAO_FALHOU`\
+            \ (it couldn't be checked; send it again)."
+          enum:
+          - CONTEUDO_NAO_PERMITIDO
+          - ARQUIVO_INVALIDO
+          - VERIFICACAO_FALHOU
         situacao:
           type: string
           description: Present on `SITUACAO_IRREGULAR`.

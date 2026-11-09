@@ -4,7 +4,12 @@
 #   Secrets (Fly secrets, never in this file). Required: MONGODB_URI, KYBR_BFF_KEY_CURRENT,
 #     KYBR_HASH_SECRET, KYBR_IDEMPOTENCY_ENC_KEY, KYBR_PII_ENC_KEY, KYBR_ADMIN_TOKEN, KYBR_CNPJA_API_KEY,
 #     KYBR_CNPJA_MONTHLY_CREDITS, KYBR_CNPJA_RATE_PER_MINUTE (the provider plan's numbers are kept as
-#     secrets so they stay out of this public file; startup fails without monthly credits when live).
+#     secrets so they stay out of this public file; startup fails without monthly credits when live),
+#     KYBR_SCANNER_CLIENT_CERT, KYBR_SCANNER_CLIENT_KEY, KYBR_SCANNER_CA, KYBR_SCANNER_SPKI_SHA256 (the
+#     scanner link), KYBR_STORAGE_BUCKET, KYBR_STORAGE_KMS_KEY_ID, KYBR_STORAGE_QUARANTINE_BUCKET,
+#     KYBR_STORAGE_QUARANTINE_KMS_KEY_ID, KYBR_AWS_ROLE_ARN and AWS_ROLE_ARN
+#     (same role; Fly provides the identity token only when AWS_ROLE_ARN is set), KYBR_RESEND_API_KEY.
+#     Optional: KYBR_EMAIL_TEST_RECIPIENTS; KYBR_EMAIL_DNS_VERIFIED=true only after the DNS gate.
 #     Rotation only: KYBR_BFF_KEY_PREVIOUS, KYBR_HASH_SECRET_PREVIOUS, KYBR_ADMIN_TOKEN_PREVIOUS.
 #     deploy-prod.yml refuses to deploy while a required name is missing.
 #   MANUAL STEP (not expressible in fly.toml): allocate a STATIC EGRESS IP for this app in gru and add it
@@ -27,6 +32,15 @@ kill_timeout = "30s"
   KYBR_CLIENT_IP_PLATFORM_HEADER = "Fly-Client-IP"
   # Company-data provider: live in prod (the API key and plan numbers are secrets, see above).
   KYBR_CNPJA_MODE = "live"
+  # Isolated scanner org (mutual TLS; the certificates and the pin are secrets): clamd and the photo
+  # sanitizer on the scanner app's dedicated IPv6. Modes default to clamd / remote / s3 / resend in prod.
+  KYBR_SCANNER_HOST = "kybr-clamav.fly.dev"
+  KYBR_SCANNER_PORT = "3310"
+  KYBR_SANITIZER_HOST = "kybr-clamav.fly.dev"
+  KYBR_SANITIZER_PORT = "3311"
+  # Multipart parts: a dedicated directory on the machine's root disk, wiped by the app at startup
+  # (upload concurrency 2 x the 10.25 MiB body cap at most).
+  KYBR_UPLOAD_TEMP_DIR = "/tmp/kybr-uploads"
 
 # Public edge: 443 only (TLS terminated by Fly, TLS >= 1.2). No port 80, no force_https, no redirect.
 # Deliberately [[services]] rather than [http_service], which would add port 80.

@@ -5,6 +5,8 @@ import com.matheusmelo.kybr.dto.link.ResultadoPublico;
 import com.matheusmelo.kybr.dto.link.ResultadoPublico.CodigoConfirmacao;
 import com.matheusmelo.kybr.dto.link.ResultadoPublico.CodigoItem;
 import com.matheusmelo.kybr.dto.link.ResultadoPublico.CodigoMotivo;
+import com.matheusmelo.kybr.model.document.FormatoEnvio;
+import com.matheusmelo.kybr.model.document.SituacaoEnvio;
 import com.matheusmelo.kybr.model.link.CodigoResultado;
 import com.matheusmelo.kybr.model.link.EstadoCaso;
 import com.matheusmelo.kybr.model.link.ItemResultado;
@@ -98,15 +100,18 @@ public class PublicResultMapper {
             case DOCUMENTO_RESPONSAVEL, DOCUMENTO_SOLICITADO -> {
                 ResultadoPublico.DocumentoTipo tipo = documentoTipo(item.documentoTipo());
                 yield tipo == null || item.documentosEnviados() == null || item.documentosEnviados() < 0 ? null
-                        : new ResultadoPublico.Item(codigo, tipo, item.documentosEnviados(), null, null, null);
+                        : new ResultadoPublico.Item(codigo, tipo, item.documentosEnviados(),
+                                formatoEnvio(item.formatoEnvio()), situacaoEnvio(item), recusados(item),
+                                motivoRecusa(item), null, null, null);
             }
             case SITUACAO_IRREGULAR -> {
                 ResultadoPublico.Situacao situacao = situacao(item.situacao());
-                yield situacao == null ? null : new ResultadoPublico.Item(codigo, null, null, situacao, null, url);
+                yield situacao == null ? null : new ResultadoPublico.Item(codigo, null, null, null, null, null, null, situacao, null,
+                        url);
             }
             case EMPRESA_RECENTE -> item.dias() == null || item.dias() < 1 ? null
-                    : new ResultadoPublico.Item(codigo, null, null, null, item.dias(), null);
-            default -> new ResultadoPublico.Item(codigo, null, null, null, null, url);
+                    : new ResultadoPublico.Item(codigo, null, null, null, null, null, null, null, item.dias(), null);
+            default -> new ResultadoPublico.Item(codigo, null, null, null, null, null, null, null, null, url);
         };
     }
 
@@ -151,6 +156,28 @@ public class PublicResultMapper {
 
     private static ResultadoPublico.DocumentoTipo documentoTipo(DocumentoTipo tipo) {
         return tipo == null ? null : ResultadoPublico.DocumentoTipo.valueOf(tipo.name());
+    }
+
+    private static ResultadoPublico.SituacaoEnvio situacaoEnvio(ItemResultado item) {
+        return item.situacaoEnvio() == null ? null : ResultadoPublico.SituacaoEnvio.valueOf(item.situacaoEnvio().name());
+    }
+
+    /** Present with the state; 0 when none was refused. */
+    private static Integer recusados(ItemResultado item) {
+        if (item.situacaoEnvio() == null) {
+            return null;
+        }
+        return item.documentosRecusados() == null ? 0 : Math.max(0, item.documentosRecusados());
+    }
+
+    /** Only with {@code recusado}. */
+    private static ResultadoPublico.MotivoRecusa motivoRecusa(ItemResultado item) {
+        return item.situacaoEnvio() != SituacaoEnvio.recusado || item.motivoRecusa() == null ? null
+                : ResultadoPublico.MotivoRecusa.valueOf(item.motivoRecusa().name());
+    }
+
+    private static ResultadoPublico.FormatoEnvio formatoEnvio(FormatoEnvio formato) {
+        return formato == null ? null : ResultadoPublico.FormatoEnvio.valueOf(formato.name());
     }
 
     private static <E extends Enum<E>> E enumOrNull(Class<E> type, CodigoResultado codigo) {

@@ -17,7 +17,7 @@ updates:
       prefix: "chore(deps)"
 
   - package-ecosystem: docker
-    directories: ["/", "/deploy/log-shipper", "/deploy/alerting"]
+    directories: ["/", "/deploy/log-shipper", "/deploy/alerting", "/deploy/scanner"]
     schedule:
       interval: weekly
       day: monday

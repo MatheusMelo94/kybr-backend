@@ -1,13 +1,17 @@
 package com.matheusmelo.kybr.config;
 
 import java.net.URI;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Period;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.Name;
 import org.springframework.http.HttpMethod;
 import org.springframework.util.StringUtils;
 import org.springframework.util.unit.DataSize;
@@ -21,7 +25,8 @@ import org.springframework.util.unit.DataSize;
 @ConfigurationProperties("kybr")
 public record KybrProperties(Bff bff, ClientIp clientIp, Hashing hashing, Idempotency idempotency, Limits limits,
         Logging logging, Cnpja cnpja, Link link, Cache cache, Verification verification, RuntimeFlags runtimeFlags,
-        Pii pii, Admin admin, Metrics metrics) {
+        Pii pii, Admin admin, Metrics metrics, Upload upload, Image image, Sanitizer sanitizer, Scanner scanner,
+        Storage storage, Email email, Retention retention, Cors cors, Scan scan) {
 
     /** Secrets (BFF key, hash secret) must decode to at least this many bytes (256 bits). */
     public static final int MIN_SECRET_BYTES = 32;
@@ -46,9 +51,39 @@ public record KybrProperties(Bff bff, ClientIp clientIp, Hashing hashing, Idempo
         pii = Objects.requireNonNullElseGet(pii, () -> new Pii(null));
         admin = Objects.requireNonNullElseGet(admin, () -> new Admin(null, null, null, false));
         metrics = Objects.requireNonNullElseGet(metrics, () -> new Metrics(0));
+        upload = Objects.requireNonNullElseGet(upload, () -> new Upload(null, null, null, null, null, null));
+        image = Objects.requireNonNullElseGet(image, () -> new Image(null, null, null, null));
+        sanitizer = Objects.requireNonNullElseGet(sanitizer, () -> new Sanitizer(null, null, null, null));
+        scanner = Objects.requireNonNullElseGet(scanner,
+                () -> new Scanner(null, null, null, null, null, null, null, null, null, null));
+        storage = Objects.requireNonNullElseGet(storage,
+                () -> new Storage(null, null, null, null, null, null, null, null, null, null, null, null, null));
+        email = Objects.requireNonNullElseGet(email,
+                () -> new Email(null, null, null, null, false, null, null, null, null, null, null));
+        retention = Objects.requireNonNullElseGet(retention,
+                () -> new Retention(null, null, null, null, null, null, null));
+        cors = Objects.requireNonNullElseGet(cors, () -> new Cors(null));
+        scan = Objects.requireNonNullElseGet(scan, () -> new Scan(null, null, null, null, null, null, null, null, null));
         if (pii.encKey().equals(idempotency.encKey())) {
             throw new IllegalArgumentException("kybr.pii.enc-key must be a different keyset from kybr.idempotency.enc-key");
         }
+        if (image.mode() == Image.Mode.REMOTE) {
+            requireRemoteSanitizer(sanitizer, scanner);
+        }
+    }
+
+    /** The remote sanitizer is reached over the scan link: its address and the link's TLS material are required. */
+    private static void requireRemoteSanitizer(Sanitizer sanitizer, Scanner scanner) {
+        if (sanitizer.host() == null) {
+            throw new IllegalArgumentException("kybr.sanitizer.host is required when kybr.image.mode is remote");
+        }
+        if (sanitizer.port() == null) {
+            throw new IllegalArgumentException("kybr.sanitizer.port is required when kybr.image.mode is remote");
+        }
+        requireSha256("kybr.scanner.spki-sha256", scanner.spkiSha256());
+        requirePem("kybr.scanner.client-cert", scanner.clientCert(), "CERTIFICATE");
+        requirePem("kybr.scanner.client-key", scanner.clientKey(), "PRIVATE KEY");
+        requirePem("kybr.scanner.ca", scanner.ca(), "CERTIFICATE");
     }
 
     /**
@@ -432,6 +467,463 @@ public record KybrProperties(Bff bff, ClientIp clientIp, Hashing hashing, Idempo
         }
     }
 
+    /**
+     * Seller document uploads.
+     *
+     * @param maxBytesPerTipo original file bytes accepted per document type, across calls
+     * @param maxFilesPerCase files per case, across document types
+     * @param concurrency uploads per machine in the processing steps at once
+     * @param reencodeConcurrency photo re-encodes per machine at once
+     * @param tempDir where multipart parts are written (always to disk): an absolute path to a
+     *     dedicated, size-bounded directory, wiped at startup
+     * @param limits request limits
+     */
+    public record Upload(DataSize maxBytesPerTipo, Integer maxFilesPerCase, Integer concurrency,
+            Integer reencodeConcurrency, Path tempDir, UploadLimits limits) {
+        public Upload {
+            if (maxBytesPerTipo == null || maxBytesPerTipo.toBytes() < 1) {
+                throw new IllegalArgumentException("kybr.upload.max-bytes-per-tipo must be positive");
+            }
+            requirePositive("kybr.upload.max-files-per-case", maxFilesPerCase);
+            requirePositive("kybr.upload.concurrency", concurrency);
+            requirePositive("kybr.upload.reencode-concurrency", reencodeConcurrency);
+            if (tempDir == null || !tempDir.isAbsolute()) {
+                throw new IllegalArgumentException("kybr.upload.temp-dir must be an absolute path");
+            }
+            tempDir = tempDir.normalize();
+            if (tempDir.getParent() == null || isShared(tempDir)) {
+                // wiped at startup: never a root, the system temp directory or a home directory
+                throw new IllegalArgumentException("kybr.upload.temp-dir must be a dedicated directory");
+            }
+            limits = Objects.requireNonNullElseGet(limits, () -> new UploadLimits(null, null, null));
+        }
+
+        private static boolean isShared(Path dir) {
+            return java.util.stream.Stream.of("java.io.tmpdir", "user.home", "user.dir")
+                    .map(System::getProperty).filter(Objects::nonNull)
+                    .anyMatch(shared -> Path.of(shared).toAbsolutePath().normalize().equals(dir));
+        }
+    }
+
+    /**
+     * Document upload request limits.
+     *
+     * @param ip per socket IP
+     * @param ipUnknown per link when the client IP is unknown (a shared subject)
+     * @param perCase per case ({@code kybr.upload.limits.case})
+     */
+    public record UploadLimits(LimitWindow ip, LimitWindow ipUnknown, @Name("case") LimitWindow perCase) {
+        public UploadLimits {
+            requireLimit("kybr.upload.limits.ip", ip);
+            requireLimit("kybr.upload.limits.ip-unknown", ipUnknown);
+            requireLimit("kybr.upload.limits.case", perCase);
+        }
+    }
+
+    /**
+     * Photo re-encoding. Photos are decoded only by the isolated sanitizer service; the API reads
+     * image headers and never pixels.
+     *
+     * @param mode {@code remote} (the sanitizer service; required in prod) or {@code in-process-test}
+     *     (non-production, synthetic images only)
+     * @param maxPixels the largest width × height accepted, read from the header before any decode
+     * @param maxSide the largest width or height accepted
+     * @param targetLongEdge the long edge of a re-encoded photo, at most {@code maxSide}
+     */
+    public record Image(Mode mode, Long maxPixels, Integer maxSide, Integer targetLongEdge) {
+
+        public enum Mode { REMOTE, IN_PROCESS_TEST }
+
+        public Image {
+            mode = Objects.requireNonNullElse(mode, Mode.REMOTE);
+            if (maxPixels == null || maxPixels < 1) {
+                throw new IllegalArgumentException("kybr.image.max-pixels must be positive");
+            }
+            requirePositive("kybr.image.max-side", maxSide);
+            requirePositive("kybr.image.target-long-edge", targetLongEdge);
+            if (targetLongEdge > maxSide) {
+                throw new IllegalArgumentException("kybr.image.target-long-edge must not exceed kybr.image.max-side");
+            }
+        }
+    }
+
+    /**
+     * The photo sanitizer service in the isolated scanner organisation, reached over the scanner's
+     * mutual TLS (same client certificate, CA and pin).
+     *
+     * @param host its host name; required in remote mode
+     * @param port its TLS port; required in remote mode
+     * @param timeout the whole call, upload to last byte
+     * @param maxResponse the largest re-encoded photo accepted back
+     */
+    public record Sanitizer(String host, Integer port, Duration timeout, DataSize maxResponse) {
+        public Sanitizer {
+            host = StringUtils.hasText(host) ? host : null;
+            if (port != null) {
+                requirePort("kybr.sanitizer.port", port);
+            }
+            requirePositive("kybr.sanitizer.timeout", timeout);
+            if (maxResponse == null || maxResponse.toBytes() < 1) {
+                throw new IllegalArgumentException("kybr.sanitizer.max-response must be positive");
+            }
+        }
+    }
+
+    /**
+     * Malware scanning.
+     *
+     * @param mode {@code stub} (test signatures only; never in prod) or {@code clamd} (the isolated
+     *     scanner over mutual TLS)
+     * @param host the scanner's host name, checked against its certificate; required for clamd
+     * @param port the scanner's TLS port
+     * @param connectTimeout connection timeout
+     * @param readTimeout the wait for a verdict
+     * @param maxSignatureAge a scan session whose scanner has signatures older than this scans nothing (its files wait)
+     * @param spkiSha256 base64 SHA-256 of the scanner certificate's public key (the pin); required for clamd
+     * @param clientCert this API's client certificate, PEM; required for clamd
+     * @param clientKey its private key, PEM (PKCS#8); required for clamd; a secret
+     * @param ca the certificate authority for the scanner link only, PEM; required for clamd
+     */
+    public record Scanner(Mode mode, String host, Integer port, Duration connectTimeout, Duration readTimeout,
+            Duration maxSignatureAge, String spkiSha256, String clientCert,
+            String clientKey, String ca) {
+
+        public enum Mode { STUB, CLAMD }
+
+        public Scanner {
+            mode = Objects.requireNonNullElse(mode, Mode.STUB);
+            host = StringUtils.hasText(host) ? host : null;
+            spkiSha256 = StringUtils.hasText(spkiSha256) ? spkiSha256 : null;
+            clientCert = StringUtils.hasText(clientCert) ? clientCert : null;
+            clientKey = StringUtils.hasText(clientKey) ? clientKey : null;
+            ca = StringUtils.hasText(ca) ? ca : null;
+            requirePort("kybr.scanner.port", port);
+            requirePositive("kybr.scanner.connect-timeout", connectTimeout);
+            requirePositive("kybr.scanner.read-timeout", readTimeout);
+            requirePositive("kybr.scanner.max-signature-age", maxSignatureAge);
+            if (mode == Mode.CLAMD) {
+                if (host == null) {
+                    throw new IllegalArgumentException("kybr.scanner.host is required when kybr.scanner.mode is clamd");
+                }
+                requireSha256("kybr.scanner.spki-sha256", spkiSha256);
+                requirePem("kybr.scanner.client-cert", clientCert, "CERTIFICATE");
+                requirePem("kybr.scanner.client-key", clientKey, "PRIVATE KEY");
+                requirePem("kybr.scanner.ca", ca, "CERTIFICATE");
+            }
+        }
+
+        /** Never prints the key or the certificates. */
+        @Override
+        public String toString() {
+            return "Scanner[mode=" + mode + ", host=" + host + ", port=" + port + "]";
+        }
+    }
+
+    /**
+     * Document storage.
+     *
+     * @param mode {@code memory} (never in prod) or {@code s3}
+     * @param bucket the private bucket; required for s3
+     * @param region the bucket's region
+     * @param kmsKeyId the customer-managed key every object is encrypted under; required for s3
+     * @param quarantineBucket the private bucket received files wait in until scanned; required for s3
+     * @param quarantineKmsKeyId the quarantine's own customer-managed key; required for s3
+     * @param roleArn the role assumed with the platform's identity token; required for s3 unless
+     *     static keys are set
+     * @param oidcAudience the audience the identity token is requested for
+     * @param accessKeyId the static-key fallback (both halves or neither); a secret
+     * @param secretAccessKey the static-key fallback's secret; a secret
+     * @param endpoint an S3-compatible endpoint override (tests only); null for the real service
+     * @param connectTimeout connection timeout
+     * @param callTimeout the whole call, retries included
+     */
+    public record Storage(Mode mode, String bucket, String region, String kmsKeyId, String quarantineBucket,
+            String quarantineKmsKeyId, String roleArn,
+            String oidcAudience, String accessKeyId, String secretAccessKey, URI endpoint, Duration connectTimeout,
+            Duration callTimeout) {
+
+        public enum Mode { MEMORY, S3 }
+
+        public Storage {
+            mode = Objects.requireNonNullElse(mode, Mode.MEMORY);
+            bucket = StringUtils.hasText(bucket) ? bucket : null;
+            kmsKeyId = StringUtils.hasText(kmsKeyId) ? kmsKeyId : null;
+            quarantineBucket = StringUtils.hasText(quarantineBucket) ? quarantineBucket : null;
+            quarantineKmsKeyId = StringUtils.hasText(quarantineKmsKeyId) ? quarantineKmsKeyId : null;
+            roleArn = StringUtils.hasText(roleArn) ? roleArn : null;
+            accessKeyId = StringUtils.hasText(accessKeyId) ? accessKeyId : null;
+            secretAccessKey = StringUtils.hasText(secretAccessKey) ? secretAccessKey : null;
+            if (!StringUtils.hasText(region)) {
+                throw new IllegalArgumentException("kybr.storage.region is required");
+            }
+            if (!StringUtils.hasText(oidcAudience)) {
+                throw new IllegalArgumentException("kybr.storage.oidc-audience is required");
+            }
+            requirePositive("kybr.storage.connect-timeout", connectTimeout);
+            requirePositive("kybr.storage.call-timeout", callTimeout);
+            if ((accessKeyId == null) != (secretAccessKey == null)) {
+                throw new IllegalArgumentException(
+                        "kybr.storage.access-key-id and kybr.storage.secret-access-key must be set together");
+            }
+            if (mode == Mode.S3) {
+                if (bucket == null) {
+                    throw new IllegalArgumentException("kybr.storage.bucket is required when kybr.storage.mode is s3");
+                }
+                if (kmsKeyId == null) {
+                    throw new IllegalArgumentException(
+                            "kybr.storage.kms-key-id is required when kybr.storage.mode is s3");
+                }
+                if (quarantineBucket == null) {
+                    throw new IllegalArgumentException(
+                            "kybr.storage.quarantine-bucket is required when kybr.storage.mode is s3");
+                }
+                if (quarantineKmsKeyId == null) {
+                    throw new IllegalArgumentException(
+                            "kybr.storage.quarantine-kms-key-id is required when kybr.storage.mode is s3");
+                }
+                if (quarantineBucket.equals(bucket) || quarantineKmsKeyId.equals(kmsKeyId)) {
+                    throw new IllegalArgumentException("kybr.storage.quarantine-bucket and "
+                            + "kybr.storage.quarantine-kms-key-id must differ from the final bucket and key");
+                }
+                if (roleArn == null && accessKeyId == null) {
+                    throw new IllegalArgumentException(
+                            "kybr.storage.role-arn (or the static keys) is required when kybr.storage.mode is s3");
+                }
+            }
+        }
+
+        /** Never prints the static keys. */
+        @Override
+        public String toString() {
+            return "Storage[mode=" + mode + ", bucket=" + bucket + ", quarantineBucket=" + quarantineBucket
+                    + ", region=" + region + ", staticKeys="
+                    + (accessKeyId != null) + "]";
+        }
+    }
+
+    /**
+     * Transactional e-mail.
+     *
+     * @param mode {@code recording} (kept in memory, never sent; never in prod) or {@code resend}
+     * @param apiKey the provider key, sent in a header only; required for resend; a secret
+     * @param baseUrl the provider's API base URL ({@code https:})
+     * @param from the sender, {@code Name <address>}
+     * @param dnsVerified whether the sending domain's DKIM, SPF and DMARC records are published; the
+     *     live sender sends nothing until it is true
+     * @param testRecipients the only addresses the operator test e-mail may go to (lower-cased)
+     * @param events per-event switches
+     * @param caps messages per address
+     * @param dispatcher the outbox dispatcher
+     * @param connectTimeout connection timeout
+     * @param readTimeout the wait for the provider's answer
+     */
+    public record Email(Mode mode, String apiKey, URI baseUrl, String from, boolean dnsVerified,
+            List<String> testRecipients, Events events, Caps caps, Dispatcher dispatcher, Duration connectTimeout,
+            Duration readTimeout) {
+
+        public enum Mode { RECORDING, RESEND }
+
+        public Email {
+            mode = Objects.requireNonNullElse(mode, Mode.RECORDING);
+            apiKey = StringUtils.hasText(apiKey) ? apiKey : null;
+            if (mode == Mode.RESEND && apiKey == null) {
+                throw new IllegalArgumentException("kybr.email.api-key is required when kybr.email.mode is resend");
+            }
+            requireHttps("kybr.email.base-url", baseUrl);
+            if (!StringUtils.hasText(from)) {
+                throw new IllegalArgumentException("kybr.email.from is required");
+            }
+            testRecipients = Objects.requireNonNullElse(testRecipients, List.<String>of()).stream()
+                    .filter(StringUtils::hasText)
+                    .map(address -> address.strip().toLowerCase(Locale.ROOT))
+                    .toList();
+            if (testRecipients.stream().anyMatch(address -> !address.matches("[^@\\s]+@[^@\\s]+\\.[^@\\s]+"))) {
+                throw new IllegalArgumentException("kybr.email.test-recipients must be e-mail addresses");
+            }
+            events = Objects.requireNonNullElseGet(events, () -> new Events(null));
+            if (mode == Mode.RESEND && !dnsVerified && events.contatoAlterado().enabled()) {
+                // the live sender sends nothing until the domain is verified; an enabled notice would fail for good
+                throw new IllegalArgumentException("kybr.email.events.contato-alterado.enabled needs "
+                        + "kybr.email.dns-verified=true when kybr.email.mode is resend");
+            }
+            caps = Objects.requireNonNullElseGet(caps, () -> new Caps(0, 0));
+            dispatcher = Objects.requireNonNullElseGet(dispatcher, () -> new Dispatcher(null, null, null, null));
+            requirePositive("kybr.email.connect-timeout", connectTimeout);
+            requirePositive("kybr.email.read-timeout", readTimeout);
+        }
+
+        /** @param contatoAlterado the notice to a seller's previous address after a contact change */
+        public record Events(Toggle contatoAlterado) {
+            public Events {
+                contatoAlterado = Objects.requireNonNullElseGet(contatoAlterado, () -> new Toggle(false));
+            }
+        }
+
+        public record Toggle(boolean enabled) {
+        }
+
+        /** At most {@code perHour} and {@code perDay} messages per address; more are dropped. */
+        public record Caps(int perHour, int perDay) {
+            public Caps {
+                requirePositive("kybr.email.caps.per-hour", perHour);
+                requirePositive("kybr.email.caps.per-day", perDay);
+                if (perHour > perDay) {
+                    throw new IllegalArgumentException("kybr.email.caps.per-hour must not exceed per-day");
+                }
+            }
+        }
+
+        /**
+         * @param enabled whether this machine runs the scheduled dispatcher (default true); off only in
+         *     tests, which trigger it on demand; prod refuses to start with it off
+         * @param interval how often due events are claimed
+         * @param lease how long a claim holds an event
+         * @param backoff the wait before each retry of a retryable failure, in order; after the last
+         *     one the event fails
+         */
+        public record Dispatcher(Boolean enabled, Duration interval, Duration lease, List<Duration> backoff) {
+            public Dispatcher {
+                enabled = Objects.requireNonNullElse(enabled, Boolean.TRUE);
+                requirePositive("kybr.email.dispatcher.interval", interval);
+                requirePositive("kybr.email.dispatcher.lease", lease);
+                backoff = List.copyOf(Objects.requireNonNullElse(backoff, List.of()));
+                if (backoff.isEmpty() || backoff.stream().anyMatch(d -> d.isNegative() || d.isZero())) {
+                    throw new IllegalArgumentException("kybr.email.dispatcher.backoff needs at least one positive duration");
+                }
+            }
+        }
+
+        /** Never prints the key. */
+        @Override
+        public String toString() {
+            return "Email[mode=" + mode + ", from=" + from + ", dnsVerified=" + dnsVerified + "]";
+        }
+    }
+
+    /**
+     * Document retention.
+     *
+     * @param enabled whether this machine runs the scheduled retention jobs (default true); off only in
+     *     tests, which trigger them on demand; prod refuses to start with it off
+     * @param backstop the retention date given to a never-decided case: this long after the seller's
+     *     last activity
+     * @param interval how often due cases are claimed
+     * @param backstopInterval how often the backstop dates are recomputed
+     * @param orphanInterval how often stored objects without a record are looked for
+     * @param orphanMinAge an orphaned object younger than this is kept (it may be mid-upload)
+     * @param lease how long a claim holds a case
+     */
+    public record Retention(Boolean enabled, Period backstop, Duration interval, Duration backstopInterval,
+            Duration orphanInterval, Duration orphanMinAge, Duration lease) {
+        public Retention {
+            enabled = Objects.requireNonNullElse(enabled, Boolean.TRUE);
+            if (backstop == null || backstop.isNegative() || backstop.isZero()) {
+                throw new IllegalArgumentException("kybr.retention.backstop must be a positive period");
+            }
+            requirePositive("kybr.retention.interval", interval);
+            requirePositive("kybr.retention.backstop-interval", backstopInterval);
+            requirePositive("kybr.retention.orphan-interval", orphanInterval);
+            requirePositive("kybr.retention.orphan-min-age", orphanMinAge);
+            requirePositive("kybr.retention.lease", lease);
+        }
+    }
+
+    /**
+     * The asynchronous scan job: received files are claimed from quarantine, scanned, re-encoded
+     * (photos) and accepted or refused.
+     *
+     * @param enabled whether this machine schedules the job and starts it after an upload (default
+     *     true); off only in tests, which run it on demand; prod refuses to start with it off
+     * @param workers files scanned at once per machine
+     * @param pollInterval how often due and abandoned files are looked for (a missed nudge, a lost lease)
+     * @param wakeTimeout how long a session waits for a stopped scanner to answer; at most 120 s
+     * @param wakeInterval the pause between wake-up probes
+     * @param lease how long a claim holds a file
+     * @param maxAttempts scans attempted before a file is refused as not verifiable
+     * @param backoff the wait before each retry, by attempt (the last value repeats)
+     * @param stuckAfter a file still pending after this long is reported stuck
+     */
+    public record Scan(Boolean enabled, Integer workers, Duration pollInterval, Duration wakeTimeout,
+            Duration wakeInterval, Duration lease, Integer maxAttempts, List<Duration> backoff, Duration stuckAfter) {
+
+        static final Duration MAX_WAKE_TIMEOUT = Duration.ofSeconds(120);
+
+        public Scan {
+            enabled = Objects.requireNonNullElse(enabled, Boolean.TRUE);
+            workers = Objects.requireNonNullElse(workers, 2);
+            pollInterval = Objects.requireNonNullElse(pollInterval, Duration.ofSeconds(10));
+            wakeTimeout = Objects.requireNonNullElse(wakeTimeout, MAX_WAKE_TIMEOUT);
+            wakeInterval = Objects.requireNonNullElse(wakeInterval, Duration.ofSeconds(5));
+            lease = Objects.requireNonNullElse(lease, Duration.ofMinutes(5));
+            maxAttempts = Objects.requireNonNullElse(maxAttempts, 6);
+            backoff = List.copyOf(Objects.requireNonNullElse(backoff, List.of(Duration.ofMinutes(1),
+                    Duration.ofMinutes(5), Duration.ofMinutes(15), Duration.ofHours(1), Duration.ofHours(3))));
+            stuckAfter = Objects.requireNonNullElse(stuckAfter, Duration.ofHours(24));
+            requirePositive("kybr.scan.workers", workers);
+            requirePositive("kybr.scan.poll-interval", pollInterval);
+            requirePositive("kybr.scan.wake-timeout", wakeTimeout);
+            if (wakeTimeout.compareTo(MAX_WAKE_TIMEOUT) > 0) {
+                throw new IllegalArgumentException("kybr.scan.wake-timeout must be at most 120s");
+            }
+            requirePositive("kybr.scan.wake-interval", wakeInterval);
+            requirePositive("kybr.scan.lease", lease);
+            requirePositive("kybr.scan.max-attempts", maxAttempts);
+            if (backoff.isEmpty() || backoff.stream().anyMatch(wait -> wait.isNegative() || wait.isZero())) {
+                throw new IllegalArgumentException("kybr.scan.backoff must list positive durations");
+            }
+            requirePositive("kybr.scan.stuck-after", stuckAfter);
+        }
+
+        /** The wait before the retry that follows attempt {@code attempt} (from 1). */
+        public Duration backoffAfter(int attempt) {
+            return backoff.get(Math.min(Math.max(attempt, 1), backoff.size()) - 1);
+        }
+    }
+
+    /** Cross-origin access; only the seller document upload has any. */
+    public record Cors(D6Cors d6) {
+        public Cors {
+            d6 = Objects.requireNonNullElseGet(d6, () -> new D6Cors(null, null));
+        }
+    }
+
+    /**
+     * The origins the seller's browser may upload documents from. Never credentials, never a
+     * wildcard.
+     *
+     * @param origins exact origins: {@code https://host[:port]}, or {@code http:} for localhost only
+     * @param originPatterns at most one regular expression, anchored ({@code ^https://…$}), for a
+     *     frontend preview scope; never in prod
+     */
+    public record D6Cors(List<String> origins, List<String> originPatterns) {
+        private static final Pattern ORIGIN =
+                Pattern.compile("https://[a-z0-9.-]+(?::[0-9]{1,5})?|http://(?:localhost|127\\.0\\.0\\.1)(?::[0-9]{1,5})?");
+
+        public D6Cors {
+            origins = Objects.requireNonNullElse(origins, List.<String>of()).stream()
+                    .filter(StringUtils::hasText).map(String::strip).toList();
+            originPatterns = Objects.requireNonNullElse(originPatterns, List.<String>of()).stream()
+                    .filter(StringUtils::hasText).map(String::strip).toList();
+            if (origins.stream().anyMatch(origin -> !ORIGIN.matcher(origin).matches())) {
+                throw new IllegalArgumentException(
+                        "kybr.cors.d6.origins must be exact origins (https://host[:port], http: for localhost only)");
+            }
+            if (originPatterns.size() > 1) {
+                throw new IllegalArgumentException("kybr.cors.d6.origin-patterns takes at most one pattern");
+            }
+            for (String pattern : originPatterns) {
+                if (!pattern.startsWith("^https://") || !pattern.endsWith("$")) {
+                    throw new IllegalArgumentException("kybr.cors.d6.origin-patterns must be anchored: ^https://...$");
+                }
+                try {
+                    Pattern.compile(pattern);
+                } catch (PatternSyntaxException e) {
+                    throw new IllegalArgumentException("kybr.cors.d6.origin-patterns must be a valid regular expression");
+                }
+            }
+        }
+    }
+
     private static boolean isGovBr(URI uri) {
         if (uri == null || !"https".equalsIgnoreCase(uri.getScheme()) || uri.getRawUserInfo() != null
                 || uri.getHost() == null) {
@@ -457,6 +949,45 @@ public record KybrProperties(Bff bff, ClientIp clientIp, Hashing hashing, Idempo
     private static void requirePositive(String property, Duration value) {
         if (value == null || value.isNegative() || value.isZero()) {
             throw new IllegalArgumentException(property + " must be a positive duration");
+        }
+    }
+
+    private static void requirePort(String property, Integer value) {
+        if (value == null || value < 1 || value > 65_535) {
+            throw new IllegalArgumentException(property + " must be a TCP port");
+        }
+    }
+
+    private static void requireLimit(String property, LimitWindow window) {
+        if (window == null) {
+            throw new IllegalArgumentException(property + " is required");
+        }
+    }
+
+    /** A base64 SHA-256 digest (32 bytes). */
+    private static void requireSha256(String property, String value) {
+        if (value == null) {
+            throw new IllegalArgumentException(property + " is required");
+        }
+        byte[] decoded;
+        try {
+            decoded = Base64.getDecoder().decode(value);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(property + " must be base64");
+        }
+        if (decoded.length != 32) {
+            throw new IllegalArgumentException(property + " must be a SHA-256 digest");
+        }
+    }
+
+    /** One PEM block of type {@code label}. The content is checked when it is used. */
+    private static void requirePem(String property, String value, String label) {
+        if (value == null) {
+            throw new IllegalArgumentException(property + " is required");
+        }
+        String pem = value.strip();
+        if (!pem.startsWith("-----BEGIN " + label + "-----") || !pem.endsWith("-----END " + label + "-----")) {
+            throw new IllegalArgumentException(property + " must be a PEM " + label.toLowerCase(Locale.ROOT));
         }
     }
 

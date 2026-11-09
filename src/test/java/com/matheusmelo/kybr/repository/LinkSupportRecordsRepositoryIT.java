@@ -87,7 +87,7 @@ class LinkSupportRecordsRepositoryIT extends MongoIntegrationTest {
         assertThatThrownBy(() -> outbox.insert(pending(caseId))).isInstanceOf(DuplicateKeyException.class);
 
         outbox.save(new OutboxEvent(first.id(), first.tipo(), caseId, first.payloadCifrado(), first.criadoEm(), NOW,
-                false, first.expiraEm()));
+                false, first.expiraEm(), 1, first.proximaTentativa(), null, null, null, null));
         OutboxEvent next = pending(caseId);
         outbox.insert(next);
 

@@ -49,8 +49,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  *   <li>A spent budget (monthly credits, the daily verification budgets, the link's "no data" cap)
  *       or provider spend off → manual review with its reason, without a provider call.
  *   <li>The provider's per-minute gate denied → back in the queue at its retry-after.
- *   <li>The full check: found and complete → verdict; found but missing the company name, status
- *       or opening date, or opened after today (a data anomaly) → manual review
+ *   <li>The full check: found and complete → verdict; found but missing the company name, state,
+ *       status or opening date (a value of the wrong shape counts as missing), or opened after today (a data anomaly) → manual review
  *       ({@code DADOS_INCOMPLETOS}); not found → the "no data" variant and manual review;
  *       unsupported → manual review, no retry; rate limited or
  *       unavailable → retried with backoff (never sooner than the retry-after), then manual review
@@ -176,7 +176,8 @@ public class VerificationWorker {
             case CompanyDataResult.Found<CompanyRecord> found -> {
                 budgets.bookD3(slug);
                 CompanyRecord company = found.company();
-                if (company.razaoSocial() == null || company.situacao() == null || company.dataAbertura() == null) {
+                if (company.razaoSocial() == null || company.uf() == null || company.situacao() == null
+                        || company.dataAbertura() == null) {
                     log.warn("event=provider_incomplete_record tipo=full_check");
                     failed(linkCase, owner, MotivoRevisao.DADOS_INCOMPLETOS);
                     return;

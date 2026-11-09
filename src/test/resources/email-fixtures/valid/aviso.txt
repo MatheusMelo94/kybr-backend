@@ -1,0 +1,8 @@
+Assunto: Cadastro de {razao_social} atualizado
+
+Olá, {responsavel}.
+
+Recebemos os dados de {razao_social} em {quando}.
+Acompanhe em {link}.
+
+Dúvidas: https://app.kybr.com.br/ajuda

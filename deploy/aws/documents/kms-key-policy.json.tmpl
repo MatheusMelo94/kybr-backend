@@ -1,0 +1,29 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AdministrationByTheOwnerOnly",
+      "Effect": "Allow",
+      "Principal": { "AWS": "${ADMIN_ARN}" },
+      "Action": [
+        "kms:Create*", "kms:Describe*", "kms:Enable*", "kms:List*", "kms:Put*", "kms:Update*",
+        "kms:Revoke*", "kms:Disable*", "kms:Get*", "kms:Delete*", "kms:TagResource", "kms:UntagResource",
+        "kms:ScheduleKeyDeletion", "kms:CancelKeyDeletion", "kms:RotateKeyOnDemand"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "UseByTheApiRoleThroughS3OnThisBucketOnly",
+      "Effect": "Allow",
+      "Principal": { "AWS": "${ROLE_ARN}" },
+      "Action": "kms:GenerateDataKey",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": "s3.sa-east-1.amazonaws.com",
+          "kms:EncryptionContext:aws:s3:arn": "arn:aws:s3:::${BUCKET}"
+        }
+      }
+    }
+  ]
+}

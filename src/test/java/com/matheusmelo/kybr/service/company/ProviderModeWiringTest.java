@@ -1,10 +1,14 @@
 package com.matheusmelo.kybr.service.company;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.matheusmelo.kybr.config.KybrProperties;
+import com.matheusmelo.kybr.config.ProfileGuards;
 import com.matheusmelo.kybr.support.ProfileBoot;
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.Banner;
 import org.springframework.boot.WebApplicationType;
@@ -34,13 +38,33 @@ class ProviderModeWiringTest {
         }
     }
 
+    @Test
+    void prodNeverRegistersTheStubEvenInStubMode() {
+        try (ConfigurableApplicationContext context = start(Providers.class, "prod", "--kybr.cnpja.mode=stub")) {
+            assertThat(context.getBeansOfType(StubCompanyDataProvider.class)).isEmpty();
+        }
+    }
+
+    @Test
+    void prodInStubModeFailsStartupOnTheGuard() {
+        Throwable failure = catchThrowable(() -> start(GuardedProviders.class, "prod", "--kybr.cnpja.mode=stub").close());
+
+        assertThat(failure).rootCause().hasMessageContaining("kybr.cnpja.mode must be live");
+    }
+
     private static ConfigurableApplicationContext start(String profile) {
-        return new SpringApplicationBuilder(Providers.class)
+        return start(Providers.class, profile);
+    }
+
+    private static ConfigurableApplicationContext start(Class<?> source, String profile, String... extra) {
+        List<String> args = new ArrayList<>(ProfileBoot.validCloudEnv());
+        args.addAll(List.of(extra));
+        return new SpringApplicationBuilder(source)
                 .web(WebApplicationType.NONE)
                 .bannerMode(Banner.Mode.OFF)
                 .logStartupInfo(false)
                 .profiles(profile)
-                .run(ProfileBoot.validCloudEnv().toArray(String[]::new));
+                .run(args.toArray(String[]::new));
     }
 
     @Configuration(proxyBeanMethods = false)
@@ -51,5 +75,10 @@ class ProviderModeWiringTest {
         Clock clock() {
             return Clock.systemUTC();
         }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @Import({Providers.class, ProfileGuards.class})
+    static class GuardedProviders {
     }
 }

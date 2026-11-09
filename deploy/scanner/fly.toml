@@ -1,0 +1,83 @@
+# Fly.io config: ISOLATED SCANNER (kybr-clamav) in its own organisation (kybr-scan), region gru.
+# clamd (malware scan) + the photo sanitizer, each behind stunnel mutual TLS 1.3. The org holds only the
+# link's TLS material (SCAN_TLS_CERT, SCAN_TLS_KEY, SCAN_TLS_CA); the entrypoint refuses any other secret.
+# Its deploy token never sits in the API's org, CI or secrets.
+# Deploy from the repository root (build context = root, scanner-specific ignore file):
+#   fly deploy . --config deploy/scanner/fly.toml --dockerfile deploy/scanner/Dockerfile \
+#     --ignorefile deploy/scanner/Dockerfile.dockerignore --remote-only
+# Network: a dedicated IPv6 only (no IPv4), ports 3310 (clamd) and 3311 (sanitizer), raw TCP (stunnel
+# terminates TLS). Exactly one machine: fly scale count 1 --region gru.
+# Scale to zero: the Fly proxy starts the stopped machine on demand (the API's scan job wakes it) and
+# stops it when idle.
+# ALWAYS-ON SWITCH (one setting): min_machines_running = 1 in the first [[services]] (clamd, 3310). Both
+# services run on the same single machine, so keeping it running for clamd keeps the sanitizer up too.
+app = "kybr-clamav"
+primary_region = "gru"
+kill_signal = "SIGTERM"
+kill_timeout = "20s"
+# Headroom for a database reload or a large decode; the VM itself is 4 GB.
+swap_size_mb = 1024
+
+[build]
+  dockerfile = "Dockerfile"
+  ignorefile = "Dockerfile.dockerignore"
+
+[env]
+  SANITIZER_PORT = "8090"
+
+# The signature databases persist across stops: a cold start loads them from here and freshclam only
+# fetches the increments, instead of downloading ~350 MB from the ClamAV CDN on every wake-up.
+# Create once: fly volumes create clamav_db --region gru --size 1 --app kybr-clamav
+[mounts]
+  source = "clamav_db"
+  destination = "/var/lib/clamav"
+  initial_size = "1gb"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 13310
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  # The always-on switch: 0 = scale to zero (current), 1 = always on (~US$41/month). Nothing else changes.
+  min_machines_running = 0
+
+  # Headroom against idle connections (stunnel drops a peer that stalls for 10 s; clamd's MaxThreads
+  # still bounds the actual scanning work).
+  [services.concurrency]
+    type = "connections"
+    soft_limit = 16
+    hard_limit = 64
+
+  # No handlers: raw TCP passthrough, TLS is end to end between the API and stunnel.
+  [[services.ports]]
+    port = 3310
+
+  [[services.tcp_checks]]
+    interval = "30s"
+    timeout = "5s"
+    # The first boot downloads the signature databases before stunnel listens.
+    grace_period = "300s"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 13311
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [services.concurrency]
+    type = "connections"
+    soft_limit = 8
+    hard_limit = 32
+
+  [[services.ports]]
+    port = 3311
+
+  [[services.tcp_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "300s"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "4gb"

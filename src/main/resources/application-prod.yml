@@ -1,6 +1,7 @@
 # Cloud profile (Fly, behind the BFF). No secret has a default: MONGODB_URI, KYBR_BFF_KEY_CURRENT,
 # KYBR_HASH_SECRET, KYBR_IDEMPOTENCY_ENC_KEY, KYBR_PII_ENC_KEY, KYBR_ADMIN_TOKEN and (live provider)
-# KYBR_CNPJA_API_KEY must come from Fly secrets.
+# KYBR_CNPJA_API_KEY must come from Fly secrets, as must the scanner's TLS material, the storage
+# settings and KYBR_RESEND_API_KEY. ProfileGuards refuses every non-production mode.
 
 logging:
   structured:
@@ -16,3 +17,9 @@ kybr:
   cnpja:
     mode: ${KYBR_CNPJA_MODE:live}
     monthly-credits: ${KYBR_CNPJA_MONTHLY_CREDITS:} # the owner's plan value; startup fails without it when live
+  scanner:
+    mode: ${KYBR_SCANNER_MODE:clamd}
+  storage:
+    mode: ${KYBR_STORAGE_MODE:s3}
+  email:
+    mode: ${KYBR_EMAIL_MODE:resend}

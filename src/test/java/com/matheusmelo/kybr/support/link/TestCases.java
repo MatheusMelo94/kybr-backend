@@ -1,12 +1,16 @@
 package com.matheusmelo.kybr.support.link;
 
 import com.matheusmelo.kybr.model.link.Contato;
+import com.matheusmelo.kybr.model.link.DocumentosTipo;
 import com.matheusmelo.kybr.model.link.EstadoCaso;
 import com.matheusmelo.kybr.model.link.LinkCase;
+import com.matheusmelo.kybr.model.link.OrigemRetencao;
 import com.matheusmelo.kybr.model.link.Processamento;
 import com.matheusmelo.kybr.model.link.Resultado;
+import com.matheusmelo.kybr.model.link.Retencao;
 import com.matheusmelo.kybr.model.link.Revisao;
 import com.matheusmelo.kybr.model.link.Variante;
+import com.matheusmelo.kybr.model.workspace.DocumentoTipo;
 import com.matheusmelo.kybr.model.workspace.Politica;
 import com.matheusmelo.kybr.model.workspace.Workspace;
 import java.nio.charset.StandardCharsets;
@@ -17,6 +21,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -80,6 +85,11 @@ public final class TestCases {
         private Revisao revisao;
         private String idempotencyKey = UUID.randomUUID().toString();
         private Instant retencaoAte;
+        private Map<DocumentoTipo, DocumentosTipo> documentos = Map.of();
+        private int arquivosTotal;
+        private Instant tokenRevogadoEm;
+        private Retencao retencao;
+        private OrigemRetencao retencaoOrigem;
 
         private Builder(Workspace workspace) {
             workspaceId = workspace.id();
@@ -177,10 +187,32 @@ public final class TestCases {
             return this;
         }
 
+        /** What the case holds per document type; {@code arquivosTotal} follows the sum of files. */
+        public Builder documentos(Map<DocumentoTipo, DocumentosTipo> value) {
+            documentos = value;
+            arquivosTotal = value.values().stream().mapToInt(DocumentosTipo::arquivos).sum();
+            return this;
+        }
+
+        public Builder tokenRevogadoEm(Instant value) {
+            tokenRevogadoEm = value;
+            return this;
+        }
+
+        public Builder retencao(Retencao value) {
+            retencao = value;
+            return this;
+        }
+
+        public Builder retencaoOrigem(OrigemRetencao value) {
+            retencaoOrigem = value;
+            return this;
+        }
+
         public Built build() {
             LinkCase linkCase = new LinkCase(id, workspaceId, hash(token), estado, criadoEm, cnpj, responsavel, ref,
                     extId, politica, variante, resultado, verificacaoId, contato, processamento, prazoRevisao, revisao,
-                    idempotencyKey, retencaoAte);
+                    idempotencyKey, retencaoAte, documentos, arquivosTotal, tokenRevogadoEm, retencao, retencaoOrigem);
             return new Built(linkCase, token);
         }
     }

@@ -237,6 +237,22 @@ class VerificationWorkerIT extends MongoIntegrationTest {
     }
 
     @Test
+    void aRecordWhoseStateIsNotAStateCodeGoesToManualReviewAsIncomplete(CapturedOutput output) {
+        String cnpj = "45997418000315";
+        CompanyRecord active = FakeCompanyDataProvider.activeCompany();
+        fake.scriptFullCheck(cnpj, new Found<>(new CompanyRecord(active.razaoSocial(), active.municipio(), null,
+                active.cnaeCodigo(), active.cnaeDescricao(), active.situacao(), active.dataAbertura(), Regime.OUTRO,
+                active.inscricoesEstaduais(), active.qsaNomes())));
+        LinkCase linkCase = newCase(cnpj, PARTNER);
+
+        worker(fake).process(linkCase.id());
+
+        assertThat(processamento(linkCase).motivoRevisao()).isEqualTo(MotivoRevisao.DADOS_INCOMPLETOS);
+        assertThat(cases.findById(linkCase.id()).orElseThrow().resultado()).isNull();
+        assertThat(output.getAll()).contains("event=provider_incomplete_record");
+    }
+
+    @Test
     void anOpeningDateInTheFutureIsADataAnomalyThatGoesToManualReview(CapturedOutput output) {
         String cnpj = "45997418000234";
         CompanyRecord active = FakeCompanyDataProvider.activeCompany();

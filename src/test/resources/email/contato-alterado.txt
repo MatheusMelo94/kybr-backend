@@ -1,0 +1,5 @@
+Assunto: Teste: contato alterado
+
+Mensagem de teste, sem texto aprovado.
+
+O contato deste caso passou a ser {email_novo} em {quando}.

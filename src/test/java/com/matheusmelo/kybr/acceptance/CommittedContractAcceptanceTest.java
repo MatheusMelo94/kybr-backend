@@ -40,10 +40,11 @@ class CommittedContractAcceptanceTest {
         Map<String, Object> properties = (Map<String, Object>) envelope.get("properties");
         Map<String, Object> code = (Map<String, Object>) properties.get("code");
 
-        assertThat((String) info.get("version")).isEqualTo("0.2.0");
+        assertThat((String) info.get("version")).isEqualTo("0.4.0");
         assertThat(((Map<String, Object>) spec.get("paths")).keySet()).as("only the seller-link paths are published")
                 .containsExactlyInAnyOrder("/public/v/{slug}", "/public/v/{slug}/lookup", "/public/v/{slug}/verify",
-                        "/public/v/{slug}/cases/{token}", "/public/v/{slug}/cases/{token}/contact");
+                        "/public/v/{slug}/cases/{token}", "/public/v/{slug}/cases/{token}/contact",
+                        "/public/v/{slug}/cases/{token}/documents");
         assertThat((List<Map<String, Object>>) spec.get("servers")).extracting(s -> s.get("url"))
                 .containsExactly("https://api.kybr.com.br", "https://api-staging.kybr.com.br");
         assertThat(properties.keySet()).containsExactlyInAnyOrder("code", "message", "field");

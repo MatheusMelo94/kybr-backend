@@ -25,6 +25,8 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.util.UriBuilder;
 import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadConstraints;
+import tools.jackson.core.json.JsonFactory;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -35,7 +37,8 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <p>Outcomes: 200 → found (the body is mapped, then dropped); 404 → not found; 400 on an
  * alphanumeric CNPJ → unsupported; 429 → rate limited for its {@code Retry-After} (a minute when
- * absent); anything else, a timeout or an unreadable body → unavailable. A failure is logged as
+ * absent); anything else, a timeout or an unreadable body → unavailable. The body is read through
+ * a bounded stream (never more than the cap plus one byte) and parsed under explicit limits. A failure is logged as
  * the call type and status only: never the URL, the CNPJ, the body or the key.
  */
 @Component
@@ -48,11 +51,22 @@ public class CnpjaCompanyDataProvider implements CompanyDataProvider {
     private static final String FULL_CHECK = "full_check";
     /** A company record is a few KiB; anything past this is refused unread. */
     static final int MAX_BODY_BYTES = 1024 * 1024;
+    /**
+     * A company record nests a handful of levels and carries short names and numbers; anything
+     * deeper or longer is refused while parsing, within the size cap above.
+     */
+    private static final StreamReadConstraints CONSTRAINTS = StreamReadConstraints.builder()
+            .maxDocumentLength(MAX_BODY_BYTES)
+            .maxNestingDepth(32)
+            .maxNumberLength(32)
+            .maxNameLength(256)
+            .build();
 
     private final Settings settings;
     private final RestClient lookupClient;
     private final RestClient workerClient;
-    private final JsonMapper mapper = JsonMapper.builder().build();
+    private final JsonMapper mapper = JsonMapper.builder(JsonFactory.builder().streamReadConstraints(CONSTRAINTS).build())
+            .build();
 
     /**
      * @param registrations the states whose registrations a full check fetches: {@code BR} or a

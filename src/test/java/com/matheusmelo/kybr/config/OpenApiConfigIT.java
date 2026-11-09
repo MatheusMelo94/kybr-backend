@@ -21,7 +21,7 @@ class OpenApiConfigIT extends WebIntegrationTest {
     void theYamlCarriesTheContractVersionTheErrorSchemaAndTheRequestIdHeader() {
         String yaml = http().get("/v3/api-docs.yaml").asString();
 
-        assertThat(yaml).contains("version: 0.2.0").contains("ErrorResponse:").contains("X-Request-Id:");
+        assertThat(yaml).contains("version: 0.4.0").contains("ErrorResponse:").contains("X-Request-Id:");
     }
 
     @Test
@@ -39,7 +39,7 @@ class OpenApiConfigIT extends WebIntegrationTest {
     void onlyProductionRoutesReachTheContractSoActuatorProbesAndTestControllersAreExcluded() {
         assertThat(docs().<String, Object>getMap("paths").keySet()).isNotEmpty()
                 .allSatisfy(path -> assertThat(path).matches("/public/v/\\{slug}(/(lookup|verify|cases/\\{token}"
-                        + "(/contact)?))?"));
+                        + "(/contact|/documents)?))?"));
         assertThat(http().get("/v3/api-docs.yaml").asString()).doesNotContain("/test/").doesNotContain("-test")
                 .doesNotContain("probe").doesNotContain("/actuator").doesNotContain("/livez");
     }

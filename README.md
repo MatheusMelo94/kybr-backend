@@ -1,6 +1,6 @@
 # Kybr API
 
-The HTTP API behind Kybr: the seller verification link and the operations panel. This repository holds the backend only; the web frontend calls it server-to-server.
+The HTTP API behind Kybr: the seller verification link, the seller's document upload, the e-mail notices and the operations panel. This repository holds the backend only; the web frontend calls it server-to-server, except for the document upload, which the seller's browser sends directly.
 
 ## Stack
 
@@ -59,12 +59,55 @@ Configuration comes from environment variables. `.env.example` lists all of them
 | `KYBR_CNPJA_API_KEY` | live | The provider's API key, required in `live` mode |
 | `KYBR_CNPJA_MONTHLY_CREDITS` | live | The provider plan's monthly credits, required in `live` mode (`10000` elsewhere) |
 | `KYBR_CNPJA_RATE_PER_MINUTE` | no | The provider plan's per-minute call limit (default `60`, a placeholder until the plan's value is known) |
+| `KYBR_UPLOAD_TEMP_DIR` | no | Absolute directory for upload parts while they are checked (default `<java.io.tmpdir>/kybr-uploads`), wiped at startup |
+| `KYBR_CORS_D6_ORIGINS` | no | Staging only: the exact origins the seller's browser may upload from (comma-separated) |
+| `KYBR_CORS_D6_ORIGIN_PATTERN` | no | Staging only: one anchored pattern for the frontend's preview origins |
+| `KYBR_SCANNER_MODE` | no | Malware scanner mode: `stub` (default everywhere except production) or `clamd` (default in production) |
+| `KYBR_SCANNER_HOST` | clamd | The scanner's host name |
+| `KYBR_SCANNER_PORT` | no | The scanner's port (default `3310`) |
+| `KYBR_SCANNER_SPKI_SHA256` | clamd | The pinned hash of the scanner certificate's public key |
+| `KYBR_SCANNER_CLIENT_CERT` | clamd | This API's client certificate (PEM) |
+| `KYBR_SCANNER_CLIENT_KEY` | clamd | This API's client private key (PEM, PKCS#8) |
+| `KYBR_SCANNER_CA` | clamd | The certificate authority of the scanner link (PEM) |
+| `KYBR_IMAGE_MODE` | no | Photo re-encoding mode: `in-process-test` (default everywhere except production) or `remote` (default in production) |
+| `KYBR_SANITIZER_HOST` | remote | The photo sanitizer service's host name |
+| `KYBR_SANITIZER_PORT` | remote | The photo sanitizer service's port |
+| `KYBR_SCAN_ENABLED` | no | Whether this machine runs the scan job that checks uploaded files (default `true`; production refuses `false`) |
+| `KYBR_STORAGE_MODE` | no | Document storage mode: `memory` (default everywhere except production) or `s3` (default in production) |
+| `KYBR_STORAGE_BUCKET` | s3 | The private bucket for documents |
+| `KYBR_STORAGE_KMS_KEY_ID` | s3 | The KMS key every stored object is encrypted under |
+| `KYBR_STORAGE_QUARANTINE_BUCKET` | s3 | The private bucket received files wait in until they are scanned |
+| `KYBR_STORAGE_QUARANTINE_KMS_KEY_ID` | s3 | The quarantine bucket's own KMS key |
+| `KYBR_AWS_ROLE_ARN` | s3 | The role assumed with the platform's identity token (unless the static keys are set) |
+| `AWS_ROLE_ARN` | s3 (Fly) | The same role ARN under the platform's own name: Fly provides the identity token file only when it is set |
+| `KYBR_AWS_ACCESS_KEY_ID` | no | Static-key fallback for storage (set with the secret key, or neither) |
+| `KYBR_AWS_SECRET_ACCESS_KEY` | no | Static-key fallback for storage (set with the key id, or neither) |
+| `KYBR_EMAIL_MODE` | no | E-mail mode: `recording` (default everywhere except production) or `resend` (default in production) |
+| `KYBR_RESEND_API_KEY` | resend | The e-mail provider's API key |
+| `KYBR_EMAIL_DNS_VERIFIED` | no | `true` once the sending domain's DKIM, SPF and DMARC records are published (default `false`: nothing is sent) |
+| `KYBR_EMAIL_TEST_RECIPIENTS` | no | The only addresses the operator test e-mail may go to (comma-separated) |
+| `KYBR_EMAIL_CONTATO_ALTERADO_ENABLED` | no | Sends the notice to a seller's previous address after a contact change (default `false`) |
 
 Generate a 32-byte value with `openssl rand 32 | basenc --base64url`.
 
 ### Company-data provider
 
 Company lookups and verifications read company records from a provider (CNPJa). In `stub` mode, the default for local runs, tests and staging, the API answers from synthetic fixtures in `src/main/resources/provider-fixtures/`, one file per CNPJ, and makes no network call. None of the fixtures is a real company. A CNPJ without a fixture is "not found". `live` mode calls the provider and needs `KYBR_CNPJA_API_KEY` and `KYBR_CNPJA_MONTHLY_CREDITS`. Spending is bounded by credit budgets: when a budget runs out, lookups answer from the cache only and verifications go to manual review. No request fails because of a budget.
+
+### Scanner, photos, storage and e-mail
+
+Each external service has a stand-in, used by default for local runs, tests and staging, and a live mode that production always uses (the `prod` profile refuses to start with a stand-in):
+
+| Service | Stand-in | Live |
+|---|---|---|
+| Malware scanner | `stub`: flags only the test signatures, makes no network call | `clamd`: the ClamAV scanner service |
+| Photo re-encoding | `in-process-test`: strips metadata in process without decoding pixels; for synthetic test photos only | `remote`: the separate sanitizer service, which re-encodes every photo |
+| Document storage | `memory`: kept in the process, lost on restart | `s3`: two private S3 buckets, the quarantine and the final one |
+| E-mail | `recording`: kept in memory, never sent | `resend`: sent through Resend once `KYBR_EMAIL_DNS_VERIFIED` is `true` |
+
+Uploaded files wait in the quarantine until the scan job checks them: it wakes the scanner (which may be stopped when idle), scans each file, re-encodes photos, and accepts the file into the final storage or refuses it. A file that can't be checked is retried with growing pauses and refused after the sixth attempt. The job starts after each upload and also runs every few seconds on every machine.
+
+Scheduled jobs also send queued e-mail notices and delete a case's documents and contact data once its retention period ends.
 
 ## API
 
@@ -76,8 +119,9 @@ Company lookups and verifications read company records from a provider (CNPJa). 
 | `POST` | `/public/v/{slug}/verify` | BFF key | Start a verification; idempotent under `Idempotency-Key`. Answers `201` with the case token |
 | `GET` | `/public/v/{slug}/cases/{token}` | BFF key | Read a case: processing, or its result |
 | `PUT` | `/public/v/{slug}/cases/{token}/contact` | BFF key | Save the seller's contact e-mail |
+| `POST` | `/public/v/{slug}/cases/{token}/documents` | none (case token) | Upload a requested document: `multipart/form-data` with `tipo` and one or more `arquivos` (one PDF, or photos). Answers `202` with the type, its file count and `situacao_envio`; the files are verified in the background and the case read shows the outcome |
 
-The seller-link routes are called by the frontend server, never by browsers directly. They answer `404 LINK_NAO_ENCONTRADO` for an unknown or disabled link. A verification runs in the background after the `201`, and the case read reports its progress. The full contract, with every error code, is in the OpenAPI document below.
+The seller-link routes are called by the frontend server, never by browsers directly, except the document upload: the seller's browser sends it straight to the API, without credentials, and CORS answers only the configured frontend origins (the case token, not the origin, authorises the call). Files are typed by their content, a retried file is ignored, and the size and file-count rules are in the OpenAPI document. The routes answer `404 LINK_NAO_ENCONTRADO` for an unknown or disabled link. A verification runs in the background after the `201`, and the case read reports its progress. The full contract, with every error code, is in the OpenAPI document below.
 
 Readiness and metrics are served on the internal management port (`8081`) for the hosting platform's checks. They are not part of the public API.
 
@@ -121,8 +165,9 @@ src/main/java/com/matheusmelo/kybr/
   mapper/       Entity to DTO conversion
   model/        Domain types and persisted documents
   repository/   Spring Data MongoDB repositories
+  sanitizer/    The photo sanitizer service: a separate process with its own entry point, never loaded by the API
   service/      Business logic
   util/         Pure, stateless helpers
 ```
 
-Architecture rules (layer boundaries, mappers at the DTO boundary, append-only audit records) are enforced by ArchUnit tests under `src/test/java/.../arch/`.
+Architecture rules (layer boundaries, mappers at the DTO boundary, append-only audit records, no image decoding in the API, live clients only behind their production modes) are enforced by ArchUnit tests under `src/test/java/.../arch/`.

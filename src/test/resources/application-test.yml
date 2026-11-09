@@ -10,7 +10,23 @@ springdoc:
     enabled: true
 
 kybr:
+  image:
+    mode: ${KYBR_IMAGE_MODE:in-process-test} # metadata stripped in process, no decode; synthetic photos only
   verification:
     poller-enabled: false # background claims would race tests; a test that needs it turns it on
+  email:
+    test-recipients: operador.teste@example.test # the only address the operator test e-mail goes to
+    dispatcher:
+      enabled: false # tests trigger the dispatcher on demand
+  retention:
+    enabled: false # tests trigger the retention jobs on demand
+  scan:
+    enabled: false # tests run the scan job on demand
+  upload:
+    temp-dir: ${java.io.tmpdir}/kybr-uploads-test-${PID:0} # one per JVM: a startup wipe never touches another run
+  cors:
+    d6:
+      origins: [https://kybr.com.br]
+      origin-patterns: ['^https://kybr-web-[a-z0-9-]+-kybr\.vercel\.app$'] # a preview scope, as staging may have
   admin:
     allow-explicit-slug: true

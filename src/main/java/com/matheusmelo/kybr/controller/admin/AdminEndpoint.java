@@ -6,6 +6,7 @@ import com.matheusmelo.kybr.dto.admin.AdminSwitchesResponse;
 import com.matheusmelo.kybr.mapper.AdminWorkspaceMapper;
 import com.matheusmelo.kybr.model.link.TokenSlot;
 import com.matheusmelo.kybr.service.company.RuntimeFlagsService;
+import com.matheusmelo.kybr.service.email.OperatorEmailService;
 import com.matheusmelo.kybr.service.provisioning.ProvisionedWorkspace;
 import com.matheusmelo.kybr.service.provisioning.ProvisioningException;
 import com.matheusmelo.kybr.service.provisioning.ProvisioningException.Reason;
@@ -33,6 +34,10 @@ import org.springframework.stereotype.Component;
  *       {@code /autofill-global} and {@code /gasto-provedor} {@code {ativo}} → 204. A workspace's
  *       switches apply to its next request; the global ones on this machine at once and on every
  *       other machine within the runtime-flag cache (10 s).
+ *   <li>{@code POST /actuator/admin/email-teste} {@code {email}} → 204 once the fixed test e-mail
+ *       is handed to the provider (audited); 400 {@code INVALID} unless the address is on
+ *       {@code kybr.email.test-recipients}; 503 {@code UNAVAILABLE} when it wasn't sent (capped or a
+ *       provider failure), never with provider details.
  *   <li>{@code GET /actuator/admin} → the global switches; {@code GET /actuator/admin/{slug}} →
  *       one workspace.
  * </ul>
@@ -53,16 +58,20 @@ public class AdminEndpoint {
     static final String AUTOFILL_ATIVO = "autofill-ativo";
     static final String AUTOFILL_GLOBAL = "autofill-global";
     static final String GASTO_PROVEDOR = "gasto-provedor";
+    static final String EMAIL_TESTE = "email-teste";
+    static final String UNAVAILABLE = "UNAVAILABLE";
 
     private final ProvisioningService provisioning;
     private final RuntimeFlagsService flags;
     private final AdminWorkspaceMapper workspaceMapper;
+    private final OperatorEmailService operatorEmails;
 
     public AdminEndpoint(ProvisioningService provisioning, RuntimeFlagsService flags,
-            AdminWorkspaceMapper workspaceMapper) {
+            AdminWorkspaceMapper workspaceMapper, OperatorEmailService operatorEmails) {
         this.provisioning = provisioning;
         this.flags = flags;
         this.workspaceMapper = workspaceMapper;
+        this.operatorEmails = operatorEmails;
     }
 
     @ReadOperation
@@ -84,7 +93,7 @@ public class AdminEndpoint {
     public WebEndpointResponse<Object> operate(@Selector String operacao, SecurityContext security,
             @Nullable String nome, @Nullable String categoria, @Nullable String contato_tipo,
             @Nullable String contato_valor, @Nullable String plano, @Nullable String slug,
-            @Nullable String ativo) {
+            @Nullable String ativo, @Nullable String email) {
         TokenSlot slot = slot(security);
         try {
             switch (operacao) {
@@ -103,12 +112,26 @@ public class AdminEndpoint {
                 case AUTOFILL_ATIVO -> provisioning.setAutofillAtivo(slugOf(slug), flag(ativo), slot);
                 case AUTOFILL_GLOBAL -> provisioning.setGlobalAutofill(flag(ativo), slot);
                 case GASTO_PROVEDOR -> provisioning.setGastoProvedor(flag(ativo), slot);
+                case EMAIL_TESTE -> {
+                    return testEmail(email, slot);
+                }
                 default -> throw new ProvisioningException(Reason.NOT_FOUND, "operacao");
             }
             return new WebEndpointResponse<>(WebEndpointResponse.STATUS_NO_CONTENT);
         } catch (ProvisioningException e) {
             return refused(e);
         }
+    }
+
+    /** Sent → 204; an address off the allowed list → 400; not sent → 503, never with provider details. */
+    private WebEndpointResponse<Object> testEmail(@Nullable String email, TokenSlot slot) {
+        return switch (operatorEmails.sendTest(email, slot)) {
+            case SENT -> new WebEndpointResponse<>(WebEndpointResponse.STATUS_NO_CONTENT);
+            case NOT_ALLOWED -> new WebEndpointResponse<>(new AdminErrorResponse(Reason.INVALID.name(), "email"),
+                    WebEndpointResponse.STATUS_BAD_REQUEST);
+            case NOT_SENT -> new WebEndpointResponse<>(new AdminErrorResponse(UNAVAILABLE, "email"),
+                    WebEndpointResponse.STATUS_SERVICE_UNAVAILABLE);
+        };
     }
 
     /** The slot the security chain authenticated; anything else is a wiring fault, never a pass. */

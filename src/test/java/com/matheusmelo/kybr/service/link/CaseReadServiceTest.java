@@ -22,6 +22,7 @@ import com.matheusmelo.kybr.model.workspace.Workspace;
 import com.matheusmelo.kybr.repository.LinkCaseRepository;
 import com.matheusmelo.kybr.support.link.TestCases;
 import com.matheusmelo.kybr.support.link.TestWorkspaces;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
@@ -92,6 +93,44 @@ class CaseReadServiceTest {
         InOrder order = inOrder(limits, repository);
         order.verify(limits).caseRead(ip, workspace);
         order.verify(repository).findByTokenHashAndWorkspaceId(anyString(), any(UUID.class));
+    }
+
+    @Test
+    void aRevokedTokenIsCaseNotFoundThroughTheSameSingleQuery() {
+        TestCases.Built built = TestCases.builder(workspace).tokenRevogadoEm(Instant.parse("2026-01-01T00:00:00Z")).build();
+        when(repository.findByTokenHashAndWorkspaceId(TestCases.hash(built.token()), workspace.id()))
+                .thenReturn(Optional.of(built.linkCase()));
+
+        assertCaseNotFound(() -> service.find(workspace, built.token()));
+
+        verify(repository, times(1)).findByTokenHashAndWorkspaceId(TestCases.hash(built.token()), workspace.id());
+        verifyNoMoreInteractions(repository);
+    }
+
+    @Test
+    void aRevokedTokenIsCaseNotFoundOnTheSellerRead() {
+        ClientIp ip = new ClientIp("198.51.100.4", ClientIp.Source.FORWARDED);
+        TestCases.Built built = TestCases.builder(workspace).tokenRevogadoEm(Instant.parse("2026-01-01T00:00:00Z")).build();
+        when(repository.findByTokenHashAndWorkspaceId(TestCases.hash(built.token()), workspace.id()))
+                .thenReturn(Optional.of(built.linkCase()));
+
+        assertCaseNotFound(() -> service.read(workspace, ip, built.token()));
+    }
+
+    @Test
+    void lookupAnswersEmptyForARevokedOrUnknownTokenAndTheCaseOtherwise() {
+        TestCases.Built revoked = TestCases.builder(workspace).tokenRevogadoEm(Instant.parse("2026-01-01T00:00:00Z")).build();
+        TestCases.Built active = TestCases.builder(workspace).build();
+        when(repository.findByTokenHashAndWorkspaceId(anyString(), any(UUID.class))).thenReturn(Optional.empty());
+        when(repository.findByTokenHashAndWorkspaceId(TestCases.hash(revoked.token()), workspace.id()))
+                .thenReturn(Optional.of(revoked.linkCase()));
+        when(repository.findByTokenHashAndWorkspaceId(TestCases.hash(active.token()), workspace.id()))
+                .thenReturn(Optional.of(active.linkCase()));
+
+        assertThat(service.lookup(workspace, revoked.token())).isEmpty();
+        assertThat(service.lookup(workspace, TestCases.newToken())).isEmpty();
+        assertThat(service.lookup(workspace, "short")).isEmpty();
+        assertThat(service.lookup(workspace, active.token())).contains(active.linkCase());
     }
 
     private static void assertCaseNotFound(ThrowingCallable call) {

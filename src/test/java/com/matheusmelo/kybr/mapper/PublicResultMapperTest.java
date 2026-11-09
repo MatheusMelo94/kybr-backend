@@ -7,6 +7,7 @@ import com.matheusmelo.kybr.dto.link.ResultadoPublico;
 import com.matheusmelo.kybr.dto.link.ResultadoPublico.CodigoConfirmacao;
 import com.matheusmelo.kybr.dto.link.ResultadoPublico.CodigoItem;
 import com.matheusmelo.kybr.dto.link.ResultadoPublico.CodigoMotivo;
+import com.matheusmelo.kybr.model.document.FormatoEnvio;
 import com.matheusmelo.kybr.model.link.CodigoResultado;
 import com.matheusmelo.kybr.model.link.Contato;
 import com.matheusmelo.kybr.model.link.EstadoCaso;
@@ -199,6 +200,29 @@ class PublicResultMapperTest {
 
         assertThat(body).doesNotContain("qsa").doesNotContain("socio").doesNotContain("score")
                 .doesNotContain("checagens").doesNotContain("veredito").doesNotContain("politica");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void aDocumentItemCarriesHowItsFilesWereSentOnlyOnceOneWasAccepted() {
+        Resultado pending = new Resultado("EMPRESA EXEMPLO LTDA", CONSULTADO, null, PRAZO, null, List.of(
+                new ItemResultado(CodigoResultado.DOCUMENTO_RESPONSAVEL, null, null, null, null,
+                        DocumentoTipo.RESPONSAVEL, 0),
+                new ItemResultado(CodigoResultado.DOCUMENTO_SOLICITADO, null, null, null, null,
+                        DocumentoTipo.CONTRATO_SOCIAL_OU_CCMEI, 1, FormatoEnvio.pdf),
+                new ItemResultado(CodigoResultado.DOCUMENTO_SOLICITADO, null, null, null, null,
+                        DocumentoTipo.COMPROVANTE_ENDERECO, 3, FormatoEnvio.fotos)), null);
+
+        ResultadoPublico resultado = mapper.toResponse(TestCases.builder(workspace).estado(EstadoCaso.pending)
+                .resultado(pending).prazoRevisao(PRAZO).build().linkCase()).resultado();
+
+        assertThat(resultado.itens()).extracting(ResultadoPublico.Item::formatoEnvio)
+                .containsExactly(null, ResultadoPublico.FormatoEnvio.pdf, ResultadoPublico.FormatoEnvio.fotos);
+        assertThat(resultado.itens()).extracting(ResultadoPublico.Item::documentosEnviados).containsExactly(0, 1, 3);
+        List<Map<String, Object>> itens = (List<Map<String, Object>>) json(resultado).get("itens");
+        assertThat(itens.get(0)).doesNotContainKey("formato_envio");
+        assertThat(itens.get(1)).containsEntry("formato_envio", "pdf");
+        assertThat(itens.get(2)).containsEntry("formato_envio", "fotos");
     }
 
     private static Contato contato(String masked) {

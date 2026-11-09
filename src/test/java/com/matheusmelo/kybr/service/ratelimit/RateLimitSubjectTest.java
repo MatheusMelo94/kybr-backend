@@ -45,4 +45,17 @@ class RateLimitSubjectTest {
         assertThat(RateLimitSubject.forClient(new ClientIp("198.51.100.4", Source.DIRECT), "s"))
                 .hasToString("Ip[redacted]");
     }
+
+    @Test
+    void anEmailSubjectIgnoresCaseAndSurroundingSpaceAndNeverPrintsTheAddress() {
+        RateLimitSubject upper = new RateLimitSubject.Email(" Vendedor@Example.COM ");
+        RateLimitSubject lower = new RateLimitSubject.Email("vendedor@example.com");
+
+        assertThat(upper).isEqualTo(lower);
+        assertThat(upper.kind()).isEqualTo(SubjectKind.EMAIL);
+        assertThat(upper.value()).isEqualTo("vendedor@example.com");
+        assertThat(upper.toString()).doesNotContain("vendedor");
+        assertThat(SubjectKind.EMAIL.prefix()).isEqualTo("email");
+        assertThatIllegalArgumentException().isThrownBy(() -> new RateLimitSubject.Email(" "));
+    }
 }
