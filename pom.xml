@@ -27,7 +27,7 @@
         <tink.version>1.24.0</tink.version>
         <archunit.version>1.5.1</archunit.version>
         <rest-assured.version>6.3.0</rest-assured.version>
-        <aws-sdk.version>2.57.11</aws-sdk.version>
+        <aws-sdk.version>2.59.6</aws-sdk.version>
 
         <!-- Modest test JVM heap; one fork, reused (CI and dev machines alike). -->
         <test.jvm.args>-Xmx512m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -javaagent:${org.mockito:mockito-core:jar}</test.jvm.args>
