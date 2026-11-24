@@ -10,7 +10,7 @@ services:
   mongo:
     # MongoDB 7.0: 8.x refuses to start on Linux kernels 6.19 to 7.0.13 (MongoDB SERVER-121912),
     # which CI runners and many dev machines now use. Move back to 8.x once that is resolved.
-    image: mongo:7.0@sha256:8bb4442761a63a8dda452744082cdac9644b429807eb977b42324a63cef59ca4
+    image: mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     ports:
       - "127.0.0.1:27017:27017"
