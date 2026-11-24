@@ -7,7 +7,7 @@
 #     --ignorefile deploy/scanner/Dockerfile.dockerignore --remote-only
 # Base images pinned by tag + digest; Dependabot (docker ecosystem) proposes updates.
 
-FROM eclipse-temurin:25-jdk-alpine@sha256:c7c3d0bdf7f2bbc5a05a6712ed334d198360105634ea9adf76fca94f381b1e3f AS build
+FROM eclipse-temurin:25-jdk-alpine@sha256:22edbb1021420ae6e248519d1af07577742314d67d4c60fcbb2e285b7e47fa78 AS build
 WORKDIR /build
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
@@ -21,7 +21,7 @@ RUN set -eu; \
     cp "$jars" application.jar; \
     java -Djarmode=tools -jar application.jar extract --destination sanitizer
 
-FROM eclipse-temurin:25-jre-alpine@sha256:e1898fd6a11fc965a994d8ace186fd3585aeb636cf8f05f47a723fcfee0b0918 AS jre
+FROM eclipse-temurin:25-jre-alpine@sha256:69c2a26e9894016e274c880fa542956d005b3755f84db765145185e87405bd89 AS jre
 
 FROM clamav/clamav:1.5.4_base@sha256:58168cd4f48a118c7d20b76da8ffce97e579b84ed7e6d1e977c6e22b1e989c5a
 
