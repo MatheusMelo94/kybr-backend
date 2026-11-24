@@ -23,7 +23,7 @@ RUN set -eu; \
 
 FROM eclipse-temurin:25-jre-alpine@sha256:e1898fd6a11fc965a994d8ace186fd3585aeb636cf8f05f47a723fcfee0b0918 AS jre
 
-FROM clamav/clamav:1.5.4_base@sha256:58168cd4f48a118c7d20b76da8ffce97e579b84ed7e6d1e977c6e22b1e989c5a
+FROM clamav/clamav:1.5.4_base@sha256:187c76a552c21b8924e08370655c4007eb642baaace9748c5eb46a32672d8d8e
 
 USER root
 # stunnel for the mTLS front end; tini as PID 1; su-exec to drop each process to its own user; socat for
